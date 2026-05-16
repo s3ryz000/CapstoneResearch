@@ -52,11 +52,23 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
     enrollments: [],
     grades: [],
   });
-  const [subjects, setSubjects] = useState([]);
+  const [studentProgram, setStudentProgram] = useState(null); // active program object
+  const [programs, setPrograms] = useState([]);
+  // Program change modal
+  const [showProgramModal, setShowProgramModal] = useState(false);
+  const [pendingProgramId, setPendingProgramId] = useState("");
+  const [programChangeReason, setProgramChangeReason] = useState("");
+  const [programChangeRemarks, setProgramChangeRemarks] = useState("");
+  const [programChangeLoading, setProgramChangeLoading] = useState(false);
+  const [programChangeError, setProgramChangeError] = useState("");
+  // Curriculum subjects for enrollment
+  const [curriculumSubjects, setCurriculumSubjects] = useState([]);
+  const [curriculumLoading, setCurriculumLoading] = useState(false);
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState([]);
   const [enrollmentForm, setEnrollmentForm] = useState({
-    program_id: "",
     academic_year: "",
     semester: "1st",
+    year_level: "",
     status: "enrolled",
   });
   const [gradeForm, setGradeForm] = useState({
@@ -70,7 +82,18 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
   const [editingGradeId, setEditingGradeId] = useState(null);
   const [enrollmentErrors, setEnrollmentErrors] = useState({});
   const [gradeErrors, setGradeErrors] = useState({});
-  const [programs, setPrograms] = useState([]);
+
+  // Delete enrollment modal state
+  const [deleteModal, setDeleteModal] = useState({
+    open: false,
+    enrollmentId: null,
+    hasGrade: false,
+    gradeWarningMsg: "",
+    gradeValue: null,
+    confirmed: false,
+    loading: false,
+    reason: "",
+  });
 
   const refreshStudentDetail = (studentId) => {
     if (!studentId) return;
@@ -110,6 +133,14 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         enrollments: s.enrollments || [],
         grades: s.grades || [],
       });
+      // Set active program
+      if (s.program) {
+        setStudentProgram(s.program);
+      } else if (s.program_id) {
+        setStudentProgram({ id: s.program_id, code: '', name: '' });
+      } else {
+        setStudentProgram(null);
+      }
     };
 
     if (!id) {
@@ -131,14 +162,32 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
 
   useEffect(() => {
     staffApi
-      .getSubjects()
-      .then((res) => setSubjects(res?.subjects || []))
-      .catch(() => setSubjects([]));
-    staffApi
       .getPrograms()
       .then((res) => setPrograms(res?.programs || []))
       .catch(() => setPrograms([]));
   }, []);
+
+  // Fetch curriculum subjects when enrollment form year_level or semester changes
+  const fetchCurriculum = async (yearLevel, semester) => {
+    if (!studentProgram?.id || !yearLevel || !semester) {
+      setCurriculumSubjects([]);
+      setSelectedSubjectIds([]);
+      return;
+    }
+    setCurriculumLoading(true);
+    try {
+      const res = await staffApi.getProgramCurriculumFiltered(studentProgram.id, yearLevel, semester);
+      const items = res?.curriculum || [];
+      setCurriculumSubjects(items);
+      // Pre-select all by default
+      setSelectedSubjectIds(items.map((c) => c.subject_id));
+    } catch {
+      setCurriculumSubjects([]);
+      setSelectedSubjectIds([]);
+    } finally {
+      setCurriculumLoading(false);
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -208,6 +257,69 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
     }
   };
 
+  const handleProgramDropdownChange = (newProgramId) => {
+    if (!newProgramId) return;
+    if (studentProgram && String(studentProgram.id) === String(newProgramId)) return;
+    // If student already has a program, show confirmation modal
+    if (studentProgram?.id) {
+      setPendingProgramId(newProgramId);
+      setProgramChangeReason("");
+      setProgramChangeRemarks("");
+      setProgramChangeError("");
+      setShowProgramModal(true);
+    } else {
+      // No existing program — set directly
+      confirmProgramSet(newProgramId);
+    }
+  };
+
+  const confirmProgramSet = async (programId) => {
+    // Initial set: just call updateStudentProgram with reason 'Initial assignment'
+    if (!studentId) return;
+    setProgramChangeLoading(true);
+    try {
+      const res = await staffApi.updateStudentProgram(studentId, {
+        new_program_id: programId,
+        reason: 'Initial assignment',
+      });
+      const prog = programs.find((p) => String(p.id) === String(programId));
+      setStudentProgram(prog || res?.student?.program || { id: programId });
+      staffToast.success('Program set', 'Student program has been assigned.');
+    } catch (err) {
+      staffToast.error('Failed', err?.response?.data?.message || 'Could not set program.');
+    } finally {
+      setProgramChangeLoading(false);
+    }
+  };
+
+  const confirmProgramChange = async () => {
+    if (!programChangeReason) {
+      setProgramChangeError('Reason is required.');
+      return;
+    }
+    if (!studentId) return;
+    setProgramChangeLoading(true);
+    setProgramChangeError("");
+    try {
+      const res = await staffApi.updateStudentProgram(studentId, {
+        new_program_id: pendingProgramId,
+        reason: programChangeReason,
+        remarks: programChangeRemarks || undefined,
+      });
+      const prog = programs.find((p) => String(p.id) === String(pendingProgramId));
+      setStudentProgram(prog || res?.student?.program || { id: pendingProgramId });
+      setCurriculumSubjects([]);
+      setSelectedSubjectIds([]);
+      setEnrollmentForm({ academic_year: '', semester: '1st', year_level: '', status: 'enrolled' });
+      setShowProgramModal(false);
+      staffToast.success('Program changed', `Archived ${res?.archived_count ?? 0} enrollment(s). New program loaded.`);
+    } catch (err) {
+      setProgramChangeError(err?.response?.data?.message || 'Could not change program.');
+    } finally {
+      setProgramChangeLoading(false);
+    }
+  };
+
   const goNext = () => {
     if (!validatePhase(currentPhase)) return;
     setCurrentPhase((p) => Math.min(p + 1, TOTAL_PHASES));
@@ -223,58 +335,34 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
   const handleAddEnrollment = async (e) => {
     e.preventDefault();
     setEnrollmentErrors({});
-    if (
-      !enrollmentForm.program_id ||
-      !enrollmentForm.academic_year?.trim() ||
-      !enrollmentForm.semester?.trim() ||
-      !enrollmentForm.year_level
-    ) {
-      setEnrollmentErrors({
-        program_id: !enrollmentForm.program_id ? "Program is required." : null,
-        academic_year: !enrollmentForm.academic_year?.trim()
-          ? "Academic year is required."
-          : null,
-        semester: !enrollmentForm.semester?.trim()
-          ? "Semester is required."
-          : null,
-        year_level: !enrollmentForm.year_level
-          ? "Year level is required."
-          : null,
-      });
-      return;
-    }
+    const errs = {};
+    if (!enrollmentForm.academic_year?.trim()) errs.academic_year = "Academic year is required.";
+    if (!enrollmentForm.semester?.trim()) errs.semester = "Semester is required.";
+    if (!enrollmentForm.year_level) errs.year_level = "Year level is required.";
+    if (!studentProgram?.id) errs.program = "Student has no active program set.";
+    if (selectedSubjectIds.length === 0) errs.subject_ids = "Please select at least one subject.";
+    if (Object.keys(errs).length > 0) { setEnrollmentErrors(errs); return; }
     if (!studentId) return;
     try {
       await staffApi.createEnrollment(studentId, {
-        program_id: Number(enrollmentForm.program_id),
         academic_year: enrollmentForm.academic_year.trim(),
         semester: enrollmentForm.semester.trim(),
         status: enrollmentForm.status || "enrolled",
-        year_level: enrollmentForm.year_level,
+        year_level: Number(enrollmentForm.year_level),
+        subject_ids: selectedSubjectIds,
       });
-      staffToast.success("Enrollment added", "Program enrollment recorded.");
-      setEnrollmentForm({
-        program_id: "",
-        academic_year: "",
-        semester: "1st",
-        status: "enrolled",
-        year_level: "",
-      });
+      staffToast.success("Enrollment added", "Subjects enrolled successfully.");
+      setEnrollmentForm({ academic_year: "", semester: "1st", year_level: "", status: "enrolled" });
+      setCurriculumSubjects([]);
+      setSelectedSubjectIds([]);
       refreshStudentDetail(studentId);
     } catch (err) {
       const data = err?.response?.data;
       const errList = data?.errors || {};
       setEnrollmentErrors(
-        Object.fromEntries(
-          Object.entries(errList).map(([k, v]) => [
-            k,
-            Array.isArray(v) ? v[0] : v,
-          ]),
-        ),
+        Object.fromEntries(Object.entries(errList).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])),
       );
-      staffToast.error(
-        "Enrollment failed",
-        data?.message || "Could not add enrollment.",
+      staffToast.error("Enrollment failed", data?.message || "Could not add enrollment.",
       );
     }
   };
@@ -307,17 +395,53 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
     }
   };
 
-  const handleDeleteEnrollment = async (enrollmentId) => {
-    if (!studentId || !window.confirm("Remove this enrollment?")) return;
+  // Step 1: Open delete modal (no grade check yet - backend does it)
+  const handleDeleteEnrollment = (enrollmentId) => {
+    setDeleteModal({
+      open: true,
+      enrollmentId,
+      hasGrade: false,
+      gradeWarningMsg: "",
+      gradeValue: null,
+      confirmed: false,
+      loading: false,
+      reason: "",
+    });
+  };
+
+  // Step 2: Perform the actual delete (called from modal confirm button)
+  const performDeleteEnrollment = async (confirmed = false) => {
+    const { enrollmentId, reason } = deleteModal;
+    if (!studentId || !enrollmentId) return;
+    setDeleteModal((prev) => ({ ...prev, loading: true }));
     try {
-      await staffApi.deleteEnrollment(studentId, enrollmentId);
-      staffToast.success("Enrollment removed", "");
+      await staffApi.deleteEnrollment(studentId, enrollmentId, {
+        confirmed,
+        reason: reason || undefined,
+      });
+      staffToast.success("Enrollment removed", "Subject enrollment removed successfully.");
+      setDeleteModal({ open: false, enrollmentId: null, hasGrade: false, gradeWarningMsg: "", gradeValue: null, confirmed: false, loading: false, reason: "" });
       refreshStudentDetail(studentId);
     } catch (err) {
-      staffToast.error(
-        "Delete failed",
-        err?.response?.data?.message || "Could not remove enrollment.",
-      );
+      const status = err?.response?.status;
+      const data = err?.response?.data;
+      if (status === 409 && data?.requires_confirmation) {
+        // Backend says there's a grade — show the stronger warning in the modal
+        setDeleteModal((prev) => ({
+          ...prev,
+          hasGrade: true,
+          gradeWarningMsg: data.message,
+          gradeValue: data.grade_value,
+          confirmed: true, // next click will pass confirmed=true
+          loading: false,
+        }));
+      } else {
+        staffToast.error(
+          "Delete failed",
+          data?.message || "Could not remove subject enrollment. Database was not updated.",
+        );
+        setDeleteModal((prev) => ({ ...prev, loading: false }));
+      }
     }
   };
 
@@ -849,77 +973,79 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
             )}
 
             {currentPhase === 4 && (
-              <div className="mb-8 space-y-8">
-                <p className="text-gray-600 text-sm m-0">
-                  Manage subject enrollments and grades per thesis data model:{" "}
-                  <strong>enrollments</strong> (student–subject–academic
-                  year–semester–status) and <strong>grades</strong>{" "}
-                  (student–subject–academic year–semester–grade value–remarks).
-                  Fields marked * are required.
-                </p>
+              <div className="mb-8 space-y-6">
 
-                {/* Program Details */}
+                {/* ── Student Program Card ── */}
+                <div className="p-6 bg-white rounded-xl border-l-4 border-blue-500 shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
+                  <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">Student Program</h4>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex flex-col gap-1 flex-1 min-w-[240px]">
+                      <label className="text-sm font-medium text-gray-600">Active Program</label>
+                      <select
+                        value={studentProgram?.id ?? ""}
+                        onChange={(e) => handleProgramDropdownChange(e.target.value)}
+                        className={`${inputBase} ${inputNormal}`}
+                        disabled={programChangeLoading}
+                      >
+                        <option value="">— Select Program —</option>
+                        {programs.map((p) => (
+                          <option key={p.id} value={p.id}>{p.code} – {p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {studentProgram?.id && (
+                      <div className="flex-1 min-w-[200px] p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <p className="m-0 text-xs text-blue-600 font-medium uppercase tracking-wide">Current Active Program</p>
+                        <p className="m-0 mt-1 text-sm font-semibold text-blue-900">
+                          {studentProgram.code ? `${studentProgram.code} – ${studentProgram.name}` : `Program ID: ${studentProgram.id}`}
+                        </p>
+                        <p className="m-0 mt-0.5 text-xs text-blue-700">To change this program, select a different one above.</p>
+                      </div>
+                    )}
+                  </div>
+                  {!studentProgram?.id && (
+                    <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 m-0">
+                      ⚠ No active program set. Please select a program before adding subject enrollments.
+                    </p>
+                  )}
+                </div>
 
-                {/* Enrollments */}
+                {/* ── Subject Enrollments ── */}
                 <div className="p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
-                  <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">
-                    Subject Enrollments
-                  </h4>
-                  {studentDetail.enrollments.length > 0 ? (
+                  <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">Subject Enrollments</h4>
+                  {studentDetail.enrollments.filter((e) => e.status !== 'archived').length > 0 ? (
                     <div className="overflow-x-auto mb-4">
                       <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Subject
-                            </th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Academic Year
-                            </th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Semester
-                            </th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Status
-                            </th>
-                            <th className="text-right py-2 px-3 border-b border-gray-200">
-                              Actions
-                            </th>
+                            <th className="text-left py-2 px-3 border-b border-gray-200">Subject</th>
+                            <th className="text-left py-2 px-3 border-b border-gray-200">Academic Year</th>
+                            <th className="text-left py-2 px-3 border-b border-gray-200">Sem</th>
+                            <th className="text-left py-2 px-3 border-b border-gray-200">Status</th>
+                            <th className="text-right py-2 px-3 border-b border-gray-200">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {studentDetail.enrollments.map((enr) => (
-                            <tr
-                              key={enr.id}
-                              className="border-b border-gray-100 hover:bg-gray-50/50"
-                            >
-                              <td className="py-2 px-3">
-                                {enr.subject
-                                  ? `${enr.subject.code} – ${enr.subject.title}`
-                                  : enr.subject_id}
-                              </td>
+                          {/* Active enrollments */}
+                          {studentDetail.enrollments
+                            .filter((enr) => enr.status !== 'archived')
+                            .map((enr) => (
+                            <tr key={enr.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                              <td className="py-2 px-3">{enr.subject ? `${enr.subject.code} – ${enr.subject.title}` : enr.subject_id}</td>
                               <td className="py-2 px-3">{enr.academic_year}</td>
                               <td className="py-2 px-3">{enr.semester}</td>
                               <td className="py-2 px-3 capitalize">
-                                {enr.status}
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  enr.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                  enr.status === 'dropped' ? 'bg-red-100 text-red-600' :
+                                  'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {enr.status}
+                                </span>
                               </td>
                               <td className="py-2 px-3 text-right">
-                                <button
-                                  type="button"
-                                  onClick={() => startEditEnrollment(enr)}
-                                  className="text-tmcc hover:underline mr-2"
-                                  aria-label="Edit enrollment"
-                                >
-                                  <FiEdit2 className="inline" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteEnrollment(enr.id)}
-                                  className="text-red-600 hover:underline"
-                                  aria-label="Delete enrollment"
-                                >
-                                  <FiTrash2 className="inline" />
-                                </button>
+                                <button type="button" onClick={() => startEditEnrollment(enr)} className="text-tmcc hover:underline mr-2" aria-label="Edit enrollment"><FiEdit2 className="inline" /></button>
+                                <button type="button" onClick={() => handleDeleteEnrollment(enr.id)} className="text-red-600 hover:underline" aria-label="Delete enrollment"><FiTrash2 className="inline" /></button>
                               </td>
                             </tr>
                           ))}
@@ -927,202 +1053,126 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                       </table>
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-sm mb-4">
-                      No enrollments yet. Add one below.
-                    </p>
+                    <p className="text-gray-500 text-sm mb-4">No active enrollments yet. Add one below.</p>
                   )}
+
+                  {/* Archived enrollments section */}
+                  {studentDetail.enrollments.filter((e) => e.status === 'archived').length > 0 && (
+                    <details className="mt-3 mb-4">
+                      <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">
+                        Show archived/removed enrollments ({studentDetail.enrollments.filter((e) => e.status === 'archived').length})
+                      </summary>
+                      <div className="overflow-x-auto mt-2">
+                        <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden opacity-60">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="text-left py-2 px-3 border-b border-gray-200">Subject</th>
+                              <th className="text-left py-2 px-3 border-b border-gray-200">Academic Year</th>
+                              <th className="text-left py-2 px-3 border-b border-gray-200">Sem</th>
+                              <th className="text-left py-2 px-3 border-b border-gray-200">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {studentDetail.enrollments
+                              .filter((e) => e.status === 'archived')
+                              .map((enr) => (
+                                <tr key={enr.id} className="border-b border-gray-100">
+                                  <td className="py-2 px-3">{enr.subject ? `${enr.subject.code} – ${enr.subject.title}` : enr.subject_id}</td>
+                                  <td className="py-2 px-3">{enr.academic_year}</td>
+                                  <td className="py-2 px-3">{enr.semester}</td>
+                                  <td className="py-2 px-3"><span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">archived</span></td>
+                                </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  )}
+
                   {editingEnrollmentId ? (
-                    <form
-                      onSubmit={handleUpdateEnrollment}
-                      className="flex flex-wrap items-end gap-3 p-3 bg-amber-50 rounded-lg border border-amber-200"
-                    >
-                      <span className="text-sm text-amber-800 font-medium w-full">
-                        Editing status
-                      </span>
+                    <form onSubmit={handleUpdateEnrollment} className="flex flex-wrap items-end gap-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                      <span className="text-sm text-amber-800 font-medium w-full">Editing enrollment status</span>
                       <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Status (optional)
-                        </label>
-                        <select
-                          value={enrollmentForm.status}
-                          onChange={(e) =>
-                            setEnrollmentForm((p) => ({
-                              ...p,
-                              status: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${inputNormal} min-w-[140px]`}
-                        >
-                          {ENROLLMENT_STATUS_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
+                        <label className="text-sm font-medium text-gray-600">Status</label>
+                        <select value={enrollmentForm.status} onChange={(e) => setEnrollmentForm((p) => ({ ...p, status: e.target.value }))} className={`${inputBase} ${inputNormal} min-w-[140px]`}>
+                          {ENROLLMENT_STATUS_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
                       </div>
-                      <button
-                        type="submit"
-                        className="py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium"
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingEnrollmentId(null);
-                          setEnrollmentForm({
-                            subject_id: "",
-                            academic_year: "",
-                            semester: "1st",
-                            status: "enrolled",
-                          });
-                        }}
-                        className="py-2 px-4 rounded-lg bg-gray-500 text-white text-sm"
-                      >
-                        Cancel
-                      </button>
+                      <button type="submit" className="py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium">Save</button>
+                      <button type="button" onClick={() => { setEditingEnrollmentId(null); setEnrollmentForm({ academic_year: "", semester: "1st", year_level: "", status: "enrolled" }); }} className="py-2 px-4 rounded-lg bg-gray-500 text-white text-sm">Cancel</button>
                     </form>
+                  ) : !studentProgram?.id ? (
+                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 m-0">Set a Student Program above before adding enrollments.</p>
                   ) : (
-                    <form
-                      onSubmit={handleAddEnrollment}
-                      className="flex flex-wrap items-end gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200"
-                    >
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Programs *
-                        </label>
-                        <select
-                          value={enrollmentForm.program_id}
-                          onChange={(e) =>
-                            setEnrollmentForm((p) => ({
-                              ...p,
-                              program_id: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${enrollmentErrors.program_id ? inputError : inputNormal} min-w-[200px]`}
-                          required
-                        >
-                          <option value="">Select program</option>
-                          {programs.map((sub) => (
-                            <option key={sub.id} value={sub.id}>
-                              {sub.code} – {sub.name}
-                            </option>
-                          ))}
-                        </select>
-                        {enrollmentErrors.program_id && (
-                          <span className="text-xs text-red-600">
-                            {enrollmentErrors.program_id}
-                          </span>
-                        )}
+                    <form onSubmit={handleAddEnrollment} className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <p className="m-0 text-sm font-semibold text-gray-700">Add Enrollment — <span className="text-tmcc">{studentProgram?.code || `Program ID ${studentProgram?.id}`}</span> subjects only</p>
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-sm font-medium text-gray-600">Year Level *</label>
+                          <select
+                            value={enrollmentForm.year_level}
+                            onChange={(e) => {
+                              const yl = e.target.value;
+                              setEnrollmentForm((p) => ({ ...p, year_level: yl }));
+                              fetchCurriculum(yl, enrollmentForm.semester);
+                            }}
+                            className={`${inputBase} ${enrollmentErrors.year_level ? inputError : inputNormal} min-w-[140px]`}
+                          >
+                            <option value="">Select year</option>
+                            {[{n:"1st",v:1},{n:"2nd",v:2},{n:"3rd",v:3},{n:"4th",v:4}].map((l) => <option key={l.v} value={l.v}>{l.n}</option>)}
+                          </select>
+                          {enrollmentErrors.year_level && <span className="text-xs text-red-600">{enrollmentErrors.year_level}</span>}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-sm font-medium text-gray-600">Semester *</label>
+                          <select
+                            value={enrollmentForm.semester}
+                            onChange={(e) => {
+                              const sem = e.target.value;
+                              setEnrollmentForm((p) => ({ ...p, semester: sem }));
+                              fetchCurriculum(enrollmentForm.year_level, sem);
+                            }}
+                            className={`${inputBase} ${enrollmentErrors.semester ? inputError : inputNormal} min-w-[100px]`}
+                          >
+                            {SEMESTER_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                          </select>
+                          {enrollmentErrors.semester && <span className="text-xs text-red-600">{enrollmentErrors.semester}</span>}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-sm font-medium text-gray-600">Academic Year *</label>
+                          <input type="text" value={enrollmentForm.academic_year} onChange={(e) => setEnrollmentForm((p) => ({ ...p, academic_year: e.target.value }))} placeholder="e.g. 2025-2026" className={`${inputBase} ${enrollmentErrors.academic_year ? inputError : inputNormal} w-36`} />
+                          {enrollmentErrors.academic_year && <span className="text-xs text-red-600">{enrollmentErrors.academic_year}</span>}
+                        </div>
                       </div>
 
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Year Level *
-                        </label>
-                        <select
-                          value={enrollmentForm.year_level}
-                          onChange={(e) =>
-                            setEnrollmentForm((p) => ({
-                              ...p,
-                              year_level: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${enrollmentErrors.year_level ? inputError : inputNormal} min-w-[200px]`}
-                          required
-                        >
-                          <option value="">Select year level</option>
-                          {[
-                            { name: "1st", value: 1 },
-                            { name: "2nd", value: 2 },
-                            { name: "3rd", value: 3 },
-                            { name: "4th", value: 4 },
-                          ].map((level) => (
-                            <option key={level.value} value={level.value}>
-                              {level.name}
-                            </option>
-                          ))}
-                        </select>
-                        {enrollmentErrors.year_level && (
-                          <span className="text-xs text-red-600">
-                            {enrollmentErrors.year_level}
-                          </span>
-                        )}
-                      </div>
+                      {/* Curriculum Subject Checklist */}
+                      {enrollmentForm.year_level && (
+                        <div className="mt-3">
+                          <p className="m-0 mb-2 text-sm font-medium text-gray-700">
+                            Curriculum Subjects {curriculumLoading && <span className="text-xs text-gray-400 ml-1">Loading...</span>}
+                          </p>
+                          {enrollmentErrors.subject_ids && <p className="m-0 mb-2 text-xs text-red-600">{enrollmentErrors.subject_ids}</p>}
+                          {!curriculumLoading && curriculumSubjects.length === 0 && (
+                            <p className="text-sm text-gray-500">No subjects found for this year level and semester.</p>
+                          )}
+                          {curriculumSubjects.length > 0 && (
+                            <div className="grid grid-cols-1 gap-1.5 max-h-60 overflow-y-auto pr-1">
+                              {curriculumSubjects.map((c) => (
+                                <label key={c.id} className="flex items-start gap-3 p-2.5 bg-white border border-gray-200 rounded cursor-pointer hover:bg-gray-50">
+                                  <input type="checkbox" checked={selectedSubjectIds.includes(c.subject_id)} onChange={() => setSelectedSubjectIds((prev) => prev.includes(c.subject_id) ? prev.filter((id) => id !== c.subject_id) : [...prev, c.subject_id])} className="mt-0.5" />
+                                  <div className="flex-1">
+                                    <p className="m-0 text-sm font-medium text-gray-800">{c.subject?.code} – {c.subject?.title}</p>
+                                    <p className="m-0 text-xs text-gray-500">{c.subject?.units} units · Yr {c.year_level} · Sem {c.semester}</p>
+                                  </div>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Academic Year *
-                        </label>
-                        <input
-                          type="text"
-                          value={enrollmentForm.academic_year}
-                          onChange={(e) =>
-                            setEnrollmentForm((p) => ({
-                              ...p,
-                              academic_year: e.target.value,
-                            }))
-                          }
-                          placeholder="e.g. 2025-2026"
-                          className={`${inputBase} ${enrollmentErrors.academic_year ? inputError : inputNormal} w-32`}
-                        />
-                        {enrollmentErrors.academic_year && (
-                          <span className="text-xs text-red-600">
-                            {enrollmentErrors.academic_year}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Semester *
-                        </label>
-                        <select
-                          value={enrollmentForm.semester}
-                          onChange={(e) =>
-                            setEnrollmentForm((p) => ({
-                              ...p,
-                              semester: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${enrollmentErrors.semester ? inputError : inputNormal} min-w-[100px]`}
-                        >
-                          {SEMESTER_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                        {enrollmentErrors.semester && (
-                          <span className="text-xs text-red-600">
-                            {enrollmentErrors.semester}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Status (optional)
-                        </label>
-                        <select
-                          value={enrollmentForm.status}
-                          onChange={(e) =>
-                            setEnrollmentForm((p) => ({
-                              ...p,
-                              status: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${inputNormal} min-w-[120px]`}
-                        >
-                          {ENROLLMENT_STATUS_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <button
-                        type="submit"
-                        className="inline-flex items-center gap-1 py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium"
-                      >
+                      {enrollmentErrors.program && <p className="text-xs text-red-600 m-0">{enrollmentErrors.program}</p>}
+                      <button type="submit" className="inline-flex items-center gap-1 py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium">
                         <FiPlus className="inline" /> Add Enrollment
                       </button>
                     </form>
@@ -1466,6 +1516,140 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
           </div>
         </div>
       </section>
+
+      {/* ── Program Change Confirmation Modal ── */}
+      {showProgramModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Change Student Program?</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Changing this student's program will <strong>archive all current active subject enrollments</strong>.
+              Grades will be preserved. The new program's curriculum will become available for enrollment.
+            </p>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-sm font-medium text-gray-700">Reason for program change *</label>
+                <select
+                  value={programChangeReason}
+                  onChange={(e) => setProgramChangeReason(e.target.value)}
+                  className="mt-1 w-full py-2 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmcc/20 focus:border-tmcc"
+                >
+                  <option value="">— Select reason —</option>
+                  <option value="Shifted program">Shifted program</option>
+                  <option value="Wrong initial encoding">Wrong initial encoding</option>
+                  <option value="Transfer student">Transfer student</option>
+                  <option value="Administrative correction">Administrative correction</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Remarks (optional)</label>
+                <textarea
+                  value={programChangeRemarks}
+                  onChange={(e) => setProgramChangeRemarks(e.target.value)}
+                  rows={2}
+                  placeholder="Additional notes..."
+                  className="mt-1 w-full py-2 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmcc/20 focus:border-tmcc resize-none"
+                />
+              </div>
+              {programChangeError && <p className="text-xs text-red-600 m-0">{programChangeError}</p>}
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button
+                type="button"
+                onClick={confirmProgramChange}
+                disabled={programChangeLoading}
+                className="flex-1 py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium disabled:opacity-70"
+              >
+                {programChangeLoading ? "Saving..." : "Confirm Change"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowProgramModal(false); setPendingProgramId(""); }}
+                disabled={programChangeLoading}
+                className="flex-1 py-2 px-4 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Enrollment Confirmation Modal ── */}
+      {deleteModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+            {deleteModal.hasGrade ? (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 text-amber-600 text-lg font-bold">!</span>
+                  <h3 className="text-lg font-bold text-gray-900">Grade Exists — Confirm Removal</h3>
+                </div>
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                  {deleteModal.gradeWarningMsg}
+                  {deleteModal.gradeValue != null && (
+                    <span className="block mt-1 font-semibold">Recorded grade: {deleteModal.gradeValue}</span>
+                  )}
+                </p>
+                <div className="mb-3">
+                  <label className="text-sm font-medium text-gray-700">Reason for removal *</label>
+                  <input
+                    type="text"
+                    value={deleteModal.reason}
+                    onChange={(e) => setDeleteModal((p) => ({ ...p, reason: e.target.value }))}
+                    placeholder="Enter reason (required when grade exists)"
+                    className="mt-1 w-full py-2 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Remove Subject Enrollment?</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  This will archive the enrollment record. The subject will no longer appear as active and can be re-enrolled later if needed.
+                </p>
+                <div className="mb-3">
+                  <label className="text-sm font-medium text-gray-700">Reason (optional)</label>
+                  <input
+                    type="text"
+                    value={deleteModal.reason}
+                    onChange={(e) => setDeleteModal((p) => ({ ...p, reason: e.target.value }))}
+                    placeholder="Optional reason"
+                    className="mt-1 w-full py-2 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmcc/20 focus:border-tmcc"
+                  />
+                </div>
+              </>
+            )}
+            <div className="flex gap-3 mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (deleteModal.hasGrade && !deleteModal.reason?.trim()) {
+                    staffToast.error("Reason required", "Please provide a reason when removing a graded subject.");
+                    return;
+                  }
+                  performDeleteEnrollment(deleteModal.confirmed);
+                }}
+                disabled={deleteModal.loading}
+                className={`flex-1 py-2 px-4 rounded-lg text-white text-sm font-medium disabled:opacity-70 ${
+                  deleteModal.hasGrade ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'
+                }`}
+              >
+                {deleteModal.loading ? "Removing..." : deleteModal.hasGrade ? "Confirm — Archive Enrollment" : "Remove Enrollment"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ open: false, enrollmentId: null, hasGrade: false, gradeWarningMsg: "", gradeValue: null, confirmed: false, loading: false, reason: "" })}
+                disabled={deleteModal.loading}
+                className="flex-1 py-2 px-4 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

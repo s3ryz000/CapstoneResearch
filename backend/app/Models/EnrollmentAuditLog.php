@@ -4,23 +4,26 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Enrollment extends Model
+class EnrollmentAuditLog extends Model
 {
-    use SoftDeletes;
-
     protected $fillable = [
         'student_id',
+        'enrollment_id',
         'subject_id',
         'academic_year',
         'semester',
-        'status',
-        'deleted_by',
-        'delete_reason',
+        'old_status',
+        'new_status',
+        'changed_by',
+        'action',
+        'reason',
+        'had_grade',
     ];
 
-    protected $dates = ['deleted_at'];
+    protected $casts = [
+        'had_grade' => 'boolean',
+    ];
 
     public function student(): BelongsTo
     {
@@ -30,5 +33,10 @@ class Enrollment extends Model
     public function subject(): BelongsTo
     {
         return $this->belongsTo(Subject::class);
+    }
+
+    public function changedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'changed_by');
     }
 }

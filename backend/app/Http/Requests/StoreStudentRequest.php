@@ -39,6 +39,9 @@ class StoreStudentRequest extends FormRequest
             'enrollment_date' => ['required', 'date'],
             'graduation_date' => ['nullable', 'date', 'after_or_equal:enrollment_date'],
             'GPA' => ['nullable', 'numeric', 'min:0', 'max:5.00'],
+            'program_id' => ['required', 'exists:programs,id'],
+            'subject_ids' => ['nullable', 'array'],
+            'subject_ids.*' => ['exists:subjects,id'],
 
 
             'record_type' => 'required_if:is_archived,true|string',

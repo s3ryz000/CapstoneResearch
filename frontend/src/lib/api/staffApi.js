@@ -73,6 +73,11 @@ export const staffApi = {
     return data;
   },
 
+  getProgramCurriculum: async (programId) => {
+    const { data } = await apiClient.get(`/staff/programs/${programId}/curriculum`);
+    return data;
+  },
+
   getStudentById: async (id) => {
     const { data } = await apiClient.get(`/staff/students/${id}`);
     return data;
@@ -114,6 +119,20 @@ export const staffApi = {
     return data;
   },
 
+  /** Change student's active program. Requires: new_program_id, reason. Optional: remarks. */
+  updateStudentProgram: async (studentId, payload) => {
+    const { data } = await apiClient.patch(`/staff/students/${studentId}/program`, payload);
+    return data;
+  },
+
+  /** Fetch curriculum subjects for a program filtered by year_level and semester */
+  getProgramCurriculumFiltered: async (programId, yearLevel, semester) => {
+    const { data } = await apiClient.get(`/staff/programs/${programId}/curriculum`, {
+      params: { year_level: yearLevel, semester },
+    });
+    return data;
+  },
+
   /** List subjects for dropdowns (staff/admin). Per thesis: subject code, title, units. */
   getSubjects: async () => {
     const { data } = await apiClient.get('/staff/subjects');
@@ -131,8 +150,11 @@ export const staffApi = {
     return data;
   },
 
-  deleteEnrollment: async (studentId, enrollmentId) => {
-    const { data } = await apiClient.delete(`/staff/students/${studentId}/enrollments/${enrollmentId}`);
+  deleteEnrollment: async (studentId, enrollmentId, payload = {}) => {
+    // DELETE with body — axios supports this via `data` config key
+    const { data } = await apiClient.delete(`/staff/students/${studentId}/enrollments/${enrollmentId}`, {
+      data: payload,
+    });
     return data;
   },
 

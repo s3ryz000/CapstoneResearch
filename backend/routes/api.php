@@ -46,11 +46,13 @@ Route::get('/settings/current', [SystemSettingsController::class, 'current'])
 Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(function () {
     Route::get('/subjects', [StudentController::class, 'subjects']);
     Route::get('/programs', [StudentController::class, 'programs']);
+    Route::get('/programs/{id}/curriculum', [StudentController::class, 'programSubjects']);
     
 
     Route::get('/students', [StudentController::class, 'index']);
     Route::post('/students', [StudentController::class, 'store']);
     Route::post('/students/{id}/archive', [StudentController::class, 'archiveStudent']);
+    Route::patch('/students/{id}/program', [StudentController::class, 'updateProgram']);
     Route::get('/students/{id}/transcript', [StudentController::class, 'downloadTranscript']);
     Route::get('/students/{id}', [StudentController::class, 'show']);
     Route::put('/students/{id}', [StudentController::class, 'update']);

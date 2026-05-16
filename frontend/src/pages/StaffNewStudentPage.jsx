@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiArrowRight, FiCheck } from "react-icons/fi";
 import { staffToast } from "../lib/notifications";
@@ -25,9 +25,11 @@ const defaultForm = {
   folder_code: "",
   document_status: "",
   is_archived: true,
+  program_id: "",
+  subject_ids: [],
 };
 
-const TOTAL_PHASES = 4;
+const TOTAL_PHASES = 5;
 
 const StaffNewStudentPage = ({ basePath = "/staff" }) => {
   const navigate = useNavigate();
@@ -38,6 +40,37 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
   const [createdAccount, setCreatedAccount] = useState(null);
   const [loading, setLoading] = useState(false);
   const [currentPhase, setCurrentPhase] = useState(1);
+
+  const { data: programsData, isLoading: loadingPrograms } = useQuery({
+    queryKey: ["programs"],
+    queryFn: staffApi.getPrograms,
+  });
+
+  const { data: curriculumData, isLoading: loadingCurriculum } = useQuery({
+    queryKey: ["curriculum", form.program_id],
+    queryFn: () => staffApi.getProgramCurriculum(form.program_id),
+    enabled: !!form.program_id,
+  });
+
+  React.useEffect(() => {
+    if (curriculumData?.curriculum) {
+      // Default auto-select 1st year, 1st semester subjects
+      const firstSemSubjects = curriculumData.curriculum
+        .filter((c) => c.year_level === 1 && c.semester === 1)
+        .map((c) => c.subject_id);
+      setForm((prev) => ({ ...prev, subject_ids: firstSemSubjects }));
+    }
+  }, [curriculumData]);
+
+  const toggleSubject = (subjectId) => {
+    setForm((prev) => {
+      const isSelected = prev.subject_ids.includes(subjectId);
+      if (isSelected) {
+        return { ...prev, subject_ids: prev.subject_ids.filter((id) => id !== subjectId) };
+      }
+      return { ...prev, subject_ids: [...prev.subject_ids, subjectId] };
+    });
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -61,6 +94,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
         err.email = "Enter a valid email.";
     }
     if (phase === 3) {
+      if (!form.program_id) err.program_id = "Program is required.";
       if (!form.enrollment_date)
         err.enrollment_date = "Enrollment date is required.";
       if (
@@ -86,6 +120,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
     if (!form.email?.trim()) err.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
       err.email = "Enter a valid email.";
+    if (!form.program_id) err.program_id = "Program is required.";
     if (!form.enrollment_date)
       err.enrollment_date = "Enrollment date is required.";
     if (
@@ -135,6 +170,8 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
         folder_code: form.folder_code?.trim() || null,
         document_status: form.document_status?.trim() || null,
         is_archived: form.is_archived,
+        program_id: form.program_id,
+        subject_ids: form.subject_ids,
       };
       console.log('payload: ' , payload);
       const res = await staffApi.createStudent(payload);
@@ -241,25 +278,25 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
             className="flex items-center justify-center gap-0 py-4 mb-6 bg-gray-50 rounded-lg"
             aria-label="Form phases"
           >
-            {[1, 2, 3, 4].map((phase) => (
-              <div key={phase} className="flex items-center gap-2">
+            {[1, 2, 3, 4, 5].map((step) => (
+              <div key={step} className="flex items-center gap-2">
                 <span
                   className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${
-                    currentPhase === phase || currentPhase > phase
+                    currentPhase === step || currentPhase > step
                       ? "bg-tmcc text-white"
                       : "bg-gray-200 text-gray-600"
                   }`}
                 >
-                  {phase}
+                  {step}
                 </span>
                 <span
-                  className={`text-sm mr-2 ${currentPhase === phase ? "text-tmcc font-semibold" : "text-gray-600"}`}
+                  className={`text-sm mr-2 ${currentPhase === step ? "text-tmcc font-semibold" : "text-gray-600"}`}
                 >
-                  Phase {phase}
+                  Step {step}
                 </span>
-                {phase < 4 && (
+                {step < 5 && (
                   <span
-                    className={`w-10 h-0.5 mx-1 ${currentPhase > phase ? "bg-tmcc" : "bg-gray-200"}`}
+                    className={`w-8 h-0.5 mx-1 ${currentPhase > step ? "bg-tmcc" : "bg-gray-200"}`}
                   />
                 )}
               </div>
@@ -271,7 +308,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
               <div className="mb-8 p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
                 <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
                   <span className="inline-flex items-center justify-center min-w-[4.5rem] py-1.5 px-3 bg-tmcc text-white text-sm font-bold rounded-md tracking-wide">
-                    Phase 1
+                    Step 1
                   </span>
                   Personal Information
                 </h4>
@@ -380,7 +417,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
               <div className="mb-8 p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
                 <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
                   <span className="inline-flex items-center justify-center min-w-[4.5rem] py-1.5 px-3 bg-tmcc text-white text-sm font-bold rounded-md tracking-wide">
-                    Phase 2
+                    Step 2
                   </span>
                   Contact Information
                 </h4>
@@ -453,7 +490,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
               <div className="mb-8 p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
                 <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
                   <span className="inline-flex items-center justify-center min-w-[4.5rem] py-1.5 px-3 bg-tmcc text-white text-sm font-bold rounded-md tracking-wide">
-                    Phase 3
+                    Step 3
                   </span>
                   Enrollment Information
                 </h4>
@@ -465,6 +502,35 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
                   <span><strong>Password:</strong> <code className="px-1.5 py-0.5 rounded bg-amber-100 font-mono">password123</code> <span className="text-amber-700">(mock, auto-generated later)</span></span>
                 </div>
               </div> */}
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 mb-6">
+                  <div className="flex flex-col gap-1.5 md:col-span-2">
+                    <label htmlFor="program_id" className="text-sm font-medium text-gray-600">
+                      Program *
+                    </label>
+                    <select
+                      id="program_id"
+                      name="program_id"
+                      value={form.program_id}
+                      onChange={handleChange}
+                      className={`${inputBase} ${errors.program_id ? inputError : inputNormal}`}
+                      aria-invalid={!!errors.program_id}
+                      disabled={loadingPrograms}
+                    >
+                      <option value="">
+                        {loadingPrograms ? "Loading programs..." : "Select program"}
+                      </option>
+                      {programsData?.programs?.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.code} - {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.program_id && (
+                      <span className="text-xs text-red-600">{errors.program_id}</span>
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
                   <div className="flex flex-col gap-1.5">
                     <label
@@ -533,25 +599,84 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
             )}
 
             {currentPhase === 4 && (
+              <div className="mb-8 p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
+                <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
+                  <span className="inline-flex items-center justify-center min-w-[4.5rem] py-1.5 px-3 bg-tmcc text-white text-sm font-bold rounded-md tracking-wide">
+                    Step 4
+                  </span>
+                  Curriculum Subjects
+                </h4>
+
+                {form.program_id ? (
+                  <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
+                    <h5 className="m-0 mb-3 text-sm font-semibold text-gray-800">
+                      Required Subjects (1st Year, 1st Semester)
+                    </h5>
+                    <p className="text-sm text-gray-600 mb-4 mt-0">
+                      These subjects are locked based on the program selected in Phase 3.
+                    </p>
+                    {loadingCurriculum ? (
+                      <p className="text-sm text-gray-500 m-0">Loading subjects...</p>
+                    ) : curriculumData?.curriculum?.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto pr-2">
+                        {curriculumData.curriculum
+                          .filter((c) => c.year_level === 1 && c.semester === 1)
+                          .map((c) => (
+                            <label
+                              key={c.id}
+                              className="flex items-start gap-3 p-3 bg-white border border-gray-200 rounded opacity-80 cursor-not-allowed"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={true}
+                                readOnly
+                                disabled
+                                className="mt-1"
+                              />
+                              <div className="flex-1">
+                                <p className="m-0 text-sm font-medium text-gray-800">
+                                  {c.subject?.code} - {c.subject?.title}
+                                </p>
+                                <p className="m-0 text-xs text-gray-500 mt-0.5">
+                                  {c.subject?.units} Units
+                                </p>
+                              </div>
+                            </label>
+                          ))}
+                        {curriculumData.curriculum.filter((c) => c.year_level === 1 && c.semester === 1).length === 0 && (
+                           <p className="text-sm text-gray-500 m-0">No subjects found for 1st Year, 1st Semester.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 m-0">No subjects found in curriculum.</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 m-0">Please select a program in Phase 3 first.</p>
+                )}
+              </div>
+            )}
+
+            {currentPhase === 5 && (
               <>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 mb-4">
                   <input
                     type="checkbox"
                     name="is_archived"
                     id="is_archived"
-                    value={form.is_archived}
+                    checked={form.is_archived}
                     className="mr-2"
                     onChange={(e) => setForm((prev) => ({ ...prev, is_archived: e.target.checked }))}
                   />
-                  <label htmlFor="is_archived">Archive</label>
+                  <label htmlFor="is_archived">Archive this student record?</label>
                 </div>
                 {form.is_archived && (
                   <div className="mb-8 p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
                     <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
                       <span className="inline-flex items-center justify-center min-w-[4.5rem] py-1.5 px-3 bg-tmcc text-white text-sm font-bold rounded-md tracking-wide">
-                        Phase 4
+                        Step 5
                       </span>
-                      Meta Data
+                      Archive Meta Data
                     </h4>
 
                     <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
