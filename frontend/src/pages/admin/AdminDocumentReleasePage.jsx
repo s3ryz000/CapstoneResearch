@@ -205,7 +205,7 @@ const AdminDocumentReleasePage = () => {
         const blob = response.data;
         const disposition = response.headers?.['content-disposition'] || '';
         const matchedName = disposition.match(/filename="?([^"]+)"?/i);
-        const filename = matchedName?.[1] || `OFFICIAL_TRANSCRIPT_OF_RECORD_${row.id}.xlsx`;
+        const filename = matchedName?.[1] || `OFFICIAL_TRANSCRIPT_OF_RECORD_${row.id}.pdf`;
 
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -215,7 +215,7 @@ const AdminDocumentReleasePage = () => {
         link.click();
         link.remove();
         window.URL.revokeObjectURL(url);
-        adminToast.success('Transcript downloaded', 'The official transcript was downloaded as .xlsx.');
+        adminToast.success('Transcript downloaded', 'The official transcript was downloaded as .pdf.');
       } catch (err) {
         const parsed = parseApiError(err);
         adminToast.error('Download failed', parsed.message || 'Could not download transcript template.');
@@ -462,7 +462,7 @@ const AdminDocumentReleasePage = () => {
                             className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-sm bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-300"
                             onClick={() => handlePrint(req)}
                           >
-                            <FiPrinter /> {String(req.record_type || '').trim().toLowerCase() === 'transcript' ? 'Download XLSX' : 'Print'}
+                            <FiPrinter /> {String(req.record_type || '').trim().toLowerCase() === 'transcript' ? 'Download PDF' : 'Print'}
                           </button>
                         </td>
                       </tr>

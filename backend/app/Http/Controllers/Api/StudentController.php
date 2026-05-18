@@ -153,24 +153,17 @@ class StudentController extends Controller
                 ]);
             }
 
-            return $student;
-        });
-
-        // create archive record
-        if($validated['is_archived']) {
-            $archiveRecord = ArchiveRecord::create([
-                'student_id' => $student->student_id,
-                'record_type' => $validated['record_type'],
-                'cabinet_no' => $validated['cabinet_no'],
-                'shelf_no' => $validated['shelf_no'],
-                'folder_code' => $validated['folder_code'],
+            ArchiveRecord::create([
+                'student_id'      => $student->student_id,
+                'record_type'     => $validated['record_type'],
+                'cabinet_no'      => $validated['cabinet_no'],
+                'shelf_no'        => $validated['shelf_no'],
+                'folder_code'     => $validated['folder_code'],
                 'document_status' => $validated['document_status'],
             ]);
-    
-            if (!$archiveRecord) {
-                return response()->json(['message' => 'Failed to create archive record.'], 500);
-            }
-        }
+
+            return $student;
+        });
 
         SystemLog::create([
             'action' => 'Student created',
@@ -240,11 +233,6 @@ class StudentController extends Controller
         $student = Student::with(['program', 'grades.subject'])->find($id);
         if (! $student) {
             return response()->json(['message' => 'Student not found.'], 404);
-        }
-
-        $templatePath = public_path('assets/templates/OFFICIAL TRANSCRIPT OF RECORD - template.xlsx');
-        if (! file_exists($templatePath)) {
-            return response()->json(['message' => 'Transcript template file not found.'], 500);
         }
 
         return app(OfficialTranscriptExportService::class)->streamForStudent($student);
@@ -407,7 +395,7 @@ class StudentController extends Controller
             return $err;
         }
 
-        $query = Curriculum::with('subject')
+        $query = Curriculum::with(['subject', 'prerequisite'])
             ->where('program_id', $id)
             ->orderBy('year_level')
             ->orderBy('semester');
@@ -514,6 +502,55 @@ class StudentController extends Controller
         if (empty($subjectsToEnroll)) {
             return response()->json(['message' => 'No subjects found for the selected program, year level, and semester.'], 422);
         }
+
+        // ── Prerequisite validation ───────────────────────────────────────────
+        // For every subject being enrolled, if the curriculum entry declares a
+        // prerequisite the student must already have a passing grade in it.
+        // No same-batch bypass: enrolling prereq + dependent together is blocked.
+        $prereqEntries = Curriculum::where('program_id', $programId)
+            ->whereIn('subject_id', $subjectsToEnroll)
+            ->whereNotNull('prerequisite')
+            ->get(['subject_id', 'prerequisite']);
+
+        if ($prereqEntries->isNotEmpty()) {
+            $passedSubjectIds = Grade::where('student_id', $studentId)
+                ->where(function ($q) {
+                    $q->where(function ($inner) {
+                        $inner->whereNotNull('grade_value')
+                              ->where('grade_value', '>=', 1.00)
+                              ->where('grade_value', '<=', 3.00);
+                    })->orWhere(function ($inner) {
+                        $inner->whereNull('grade_value')
+                              ->where('remarks', 'PASSED');
+                    });
+                })
+                ->pluck('subject_id')
+                ->toArray();
+
+            $allIds = $prereqEntries->pluck('prerequisite')
+                ->merge($prereqEntries->pluck('subject_id'))
+                ->unique()->toArray();
+            $subjectIndex = Subject::whereIn('id', $allIds)
+                ->get(['id', 'code'])->keyBy('id');
+
+            $prereqErrors = [];
+            foreach ($prereqEntries as $entry) {
+                $prereqId = $entry->prerequisite;
+                if (! in_array($prereqId, $passedSubjectIds)) {
+                    $prereqCode   = $subjectIndex->get($prereqId)?->code   ?? "Subject #{$prereqId}";
+                    $currentCode  = $subjectIndex->get($entry->subject_id)?->code ?? "Subject #{$entry->subject_id}";
+                    $prereqErrors[] = "{$prereqCode} must be completed before enrolling in {$currentCode}.";
+                }
+            }
+
+            if (! empty($prereqErrors)) {
+                return response()->json([
+                    'message' => 'Enrollment failed: prerequisite requirements not met.',
+                    'errors'  => ['prerequisites' => $prereqErrors],
+                ], 422);
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
         // Per-subject duplicate check: only active (non-soft-deleted) enrollments count.
         // This allows re-adding subjects that were previously archived/soft-deleted.

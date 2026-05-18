@@ -112,7 +112,7 @@ const ViewRecordsPage = () => {
       const disposition = response.headers?.['content-disposition'] || '';
       const matchedName = disposition.match(/filename="?([^"]+)"?/i);
       const filename =
-        matchedName?.[1] || `OFFICIAL_TRANSCRIPT_${student.student_number ?? selectedId}.xlsx`;
+        matchedName?.[1] || `OFFICIAL_TRANSCRIPT_${student.student_number ?? selectedId}.pdf`;
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -121,7 +121,7 @@ const ViewRecordsPage = () => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      staffToast.success('Transcript downloaded', 'The official transcript was saved as .xlsx.');
+      staffToast.success('Transcript downloaded', 'The official transcript was saved as .pdf.');
     } catch (err) {
       const parsed = parseApiError(err);
       staffToast.error('Download failed', parsed.message || 'Could not download transcript.');

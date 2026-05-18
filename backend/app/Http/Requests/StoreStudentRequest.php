@@ -27,7 +27,7 @@ class StoreStudentRequest extends FormRequest
             'contact_number' => ['nullable', 'string', 'max:15'],
             'address' => ['nullable', 'string', 'max:150'],
             'place_of_birth' => ['nullable', 'string', 'max:120'],
-            'sex' => ['nullable', 'string', 'max:10', 'in:Male,Female,male,female'],
+            'sex' => ['required', 'string', 'in:M,F'],
             'guardian_name' => ['nullable', 'string', 'max:120'],
             'citizenship' => ['nullable', 'string', 'max:60'],
             'elementary_school' => ['nullable', 'string', 'max:150'],
@@ -42,14 +42,11 @@ class StoreStudentRequest extends FormRequest
             'program_id' => ['required', 'exists:programs,id'],
             'subject_ids' => ['nullable', 'array'],
             'subject_ids.*' => ['exists:subjects,id'],
-
-
-            'record_type' => 'required_if:is_archived,true|string',
-            'cabinet_no' => 'required_if:is_archived,true|string',
-            'shelf_no' => 'required_if:is_archived,true|string',
-            'folder_code' => 'required_if:is_archived,true|string',
-            'document_status' => 'required_if:is_archived,true|string',
-            'is_archived' => 'required|boolean',
+            'record_type'     => ['required', 'string', 'max:100'],
+            'cabinet_no'      => ['required', 'string', 'max:50'],
+            'shelf_no'        => ['required', 'string', 'max:50'],
+            'folder_code'     => ['required', 'string', 'max:50'],
+            'document_status' => ['required', 'string', 'max:50'],
         ];
     }
 

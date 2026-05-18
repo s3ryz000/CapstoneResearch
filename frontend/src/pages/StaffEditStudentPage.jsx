@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useNavigate, useLocation } from "react-router-dom";
 import {
@@ -17,6 +17,7 @@ const defaultForm = {
   first_name: "",
   last_name: "",
   date_of_birth: "",
+  sex: "",
   email: "",
   contact_number: "",
   address: "",
@@ -29,6 +30,22 @@ const TOTAL_PHASES = 4;
 
 const SEMESTER_OPTIONS = ["1st", "2nd"];
 const ENROLLMENT_STATUS_OPTIONS = ["enrolled", "completed", "dropped"];
+
+/**
+ * Generates academic year options as "YYYY-YYYY" strings.
+ * Includes 3 past years (for existing records) + current year + 5 future years.
+ */
+const generateAcademicYears = () => {
+  const current = new Date().getFullYear();
+  const years = [];
+  for (let y = current - 3; y <= current + 5; y++) {
+    years.push(`${y}-${y + 1}`);
+  }
+  return years;
+};
+
+const ACADEMIC_YEAR_OPTIONS = generateAcademicYears();
+const CURRENT_ACADEMIC_YEAR = `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`;
 
 const formatDateForInput = (val) => {
   if (!val) return "";
@@ -65,8 +82,16 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
   const [curriculumSubjects, setCurriculumSubjects] = useState([]);
   const [curriculumLoading, setCurriculumLoading] = useState(false);
   const [selectedSubjectIds, setSelectedSubjectIds] = useState([]);
+  const passedSubjectIds = useMemo(() => new Set(
+    (studentDetail?.grades ?? [])
+      .filter(g => {
+        const v = parseFloat(g.grade_value);
+        return (!isNaN(v) && v >= 1.0 && v <= 3.0) || g.remarks === 'PASSED';
+      })
+      .map(g => g.subject_id)
+  ), [studentDetail?.grades]);
   const [enrollmentForm, setEnrollmentForm] = useState({
-    academic_year: "",
+    academic_year: CURRENT_ACADEMIC_YEAR,
     semester: "1st",
     year_level: "",
     status: "enrolled",
@@ -120,6 +145,9 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         first_name: s.first_name ?? parts[0] ?? "",
         last_name: s.last_name ?? parts.slice(1).join(" ") ?? "",
         date_of_birth: formatDateForInput(s.date_of_birth),
+        sex: s.sex === 'Male' || s.sex === 'male' ? 'M'
+           : s.sex === 'Female' || s.sex === 'female' ? 'F'
+           : (s.sex ?? ""),
         email: s.email ?? "",
         contact_number: s.contact_number ?? "",
         address: s.address ?? "",
@@ -204,6 +232,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
       if (!form.first_name?.trim()) err.first_name = "First name is required.";
       if (!form.last_name?.trim()) err.last_name = "Last name is required.";
       if (!form.date_of_birth) err.date_of_birth = "Date of birth is required.";
+      if (!form.sex) err.sex = "Sex is required.";
     }
     if (phase === 2) {
       if (!form.email?.trim()) err.email = "Email is required.";
@@ -233,6 +262,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
     if (!form.first_name?.trim()) err.first_name = "First name is required.";
     if (!form.last_name?.trim()) err.last_name = "Last name is required.";
     if (!form.date_of_birth) err.date_of_birth = "Date of birth is required.";
+    if (!form.sex) err.sex = "Sex is required.";
     if (!form.email?.trim()) err.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
       err.email = "Enter a valid email.";
@@ -310,7 +340,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
       setStudentProgram(prog || res?.student?.program || { id: pendingProgramId });
       setCurriculumSubjects([]);
       setSelectedSubjectIds([]);
-      setEnrollmentForm({ academic_year: '', semester: '1st', year_level: '', status: 'enrolled' });
+      setEnrollmentForm({ academic_year: CURRENT_ACADEMIC_YEAR, semester: '1st', year_level: '', status: 'enrolled' });
       setShowProgramModal(false);
       staffToast.success('Program changed', `Archived ${res?.archived_count ?? 0} enrollment(s). New program loaded.`);
     } catch (err) {
@@ -352,7 +382,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         subject_ids: selectedSubjectIds,
       });
       staffToast.success("Enrollment added", "Subjects enrolled successfully.");
-      setEnrollmentForm({ academic_year: "", semester: "1st", year_level: "", status: "enrolled" });
+      setEnrollmentForm({ academic_year: CURRENT_ACADEMIC_YEAR, semester: "1st", year_level: "", status: "enrolled" });
       setCurriculumSubjects([]);
       setSelectedSubjectIds([]);
       refreshStudentDetail(studentId);
@@ -360,7 +390,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
       const data = err?.response?.data;
       const errList = data?.errors || {};
       setEnrollmentErrors(
-        Object.fromEntries(Object.entries(errList).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])),
+        Object.fromEntries(Object.entries(errList).map(([k, v]) => [k, Array.isArray(v) ? v.join(' ') : v])),
       );
       staffToast.error("Enrollment failed", data?.message || "Could not add enrollment.",
       );
@@ -382,7 +412,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
       setEditingEnrollmentId(null);
       setEnrollmentForm({
         subject_id: "",
-        academic_year: "",
+        academic_year: CURRENT_ACADEMIC_YEAR,
         semester: "1st",
         status: "enrolled",
       });
@@ -592,6 +622,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
         date_of_birth: form.date_of_birth,
+        sex: form.sex,
         email: form.email.trim(),
         contact_number: form.contact_number?.trim() || null,
         address: form.address?.trim() || null,
@@ -660,25 +691,6 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         </div>
 
         <div className="p-6">
-          {submitStatus === "success" && (
-            <div
-              className="py-3 px-4 rounded-lg mb-4 bg-green-100 text-green-800 border border-green-200 text-sm"
-              role="status"
-            >
-              <p className="m-0 font-medium">
-                Student updated successfully. Redirecting to Student Records...
-              </p>
-            </div>
-          )}
-          {submitStatus && submitStatus !== "success" && (
-            <div
-              className="py-3 px-4 rounded-lg mb-4 bg-red-100 text-red-800 border border-red-200 text-sm"
-              role="alert"
-            >
-              {submitStatus}
-            </div>
-          )}
-
           <div
             className="flex items-center justify-center gap-0 py-4 mb-6 bg-gray-50 rounded-lg flex-wrap"
             aria-label="Form steps"
@@ -768,6 +780,29 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                       <span className="text-xs text-red-600">
                         {errors.date_of_birth}
                       </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      htmlFor="sex"
+                      className="text-sm font-medium text-gray-600"
+                    >
+                      Sex *
+                    </label>
+                    <select
+                      id="sex"
+                      name="sex"
+                      value={form.sex}
+                      onChange={handleChange}
+                      className={`${inputBase} ${errors.sex ? inputError : inputNormal}`}
+                      aria-invalid={!!errors.sex}
+                    >
+                      <option value="">Select sex</option>
+                      <option value="M">Male</option>
+                      <option value="F">Female</option>
+                    </select>
+                    {errors.sex && (
+                      <span className="text-xs text-red-600">{errors.sex}</span>
                     )}
                   </div>
                 </div>
@@ -1099,7 +1134,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                         </select>
                       </div>
                       <button type="submit" className="py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium">Save</button>
-                      <button type="button" onClick={() => { setEditingEnrollmentId(null); setEnrollmentForm({ academic_year: "", semester: "1st", year_level: "", status: "enrolled" }); }} className="py-2 px-4 rounded-lg bg-gray-500 text-white text-sm">Cancel</button>
+                      <button type="button" onClick={() => { setEditingEnrollmentId(null); setEnrollmentForm({ academic_year: CURRENT_ACADEMIC_YEAR, semester: "1st", year_level: "", status: "enrolled" }); }} className="py-2 px-4 rounded-lg bg-gray-500 text-white text-sm">Cancel</button>
                     </form>
                   ) : !studentProgram?.id ? (
                     <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 m-0">Set a Student Program above before adding enrollments.</p>
@@ -1140,7 +1175,16 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                         </div>
                         <div className="flex flex-col gap-1">
                           <label className="text-sm font-medium text-gray-600">Academic Year *</label>
-                          <input type="text" value={enrollmentForm.academic_year} onChange={(e) => setEnrollmentForm((p) => ({ ...p, academic_year: e.target.value }))} placeholder="e.g. 2025-2026" className={`${inputBase} ${enrollmentErrors.academic_year ? inputError : inputNormal} w-36`} />
+                          <select
+                            value={enrollmentForm.academic_year}
+                            onChange={(e) => setEnrollmentForm((p) => ({ ...p, academic_year: e.target.value }))}
+                            className={`${inputBase} ${enrollmentErrors.academic_year ? inputError : inputNormal} w-36`}
+                          >
+                            <option value="">Select year</option>
+                            {ACADEMIC_YEAR_OPTIONS.map((yr) => (
+                              <option key={yr} value={yr}>{yr}</option>
+                            ))}
+                          </select>
                           {enrollmentErrors.academic_year && <span className="text-xs text-red-600">{enrollmentErrors.academic_year}</span>}
                         </div>
                       </div>
@@ -1152,20 +1196,29 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                             Curriculum Subjects {curriculumLoading && <span className="text-xs text-gray-400 ml-1">Loading...</span>}
                           </p>
                           {enrollmentErrors.subject_ids && <p className="m-0 mb-2 text-xs text-red-600">{enrollmentErrors.subject_ids}</p>}
+                          {enrollmentErrors.prerequisites && <p className="m-0 mb-2 text-xs text-red-600">{enrollmentErrors.prerequisites}</p>}
                           {!curriculumLoading && curriculumSubjects.length === 0 && (
                             <p className="text-sm text-gray-500">No subjects found for this year level and semester.</p>
                           )}
                           {curriculumSubjects.length > 0 && (
                             <div className="grid grid-cols-1 gap-1.5 max-h-60 overflow-y-auto pr-1">
-                              {curriculumSubjects.map((c) => (
-                                <label key={c.id} className="flex items-start gap-3 p-2.5 bg-white border border-gray-200 rounded cursor-pointer hover:bg-gray-50">
-                                  <input type="checkbox" checked={selectedSubjectIds.includes(c.subject_id)} onChange={() => setSelectedSubjectIds((prev) => prev.includes(c.subject_id) ? prev.filter((id) => id !== c.subject_id) : [...prev, c.subject_id])} className="mt-0.5" />
-                                  <div className="flex-1">
-                                    <p className="m-0 text-sm font-medium text-gray-800">{c.subject?.code} – {c.subject?.title}</p>
-                                    <p className="m-0 text-xs text-gray-500">{c.subject?.units} units · Yr {c.year_level} · Sem {c.semester}</p>
-                                  </div>
-                                </label>
-                              ))}
+                              {curriculumSubjects.map((c) => {
+                                const prereqMissing = c.prerequisite && !passedSubjectIds.has(c.prerequisite.id);
+                                return (
+                                  <label key={c.id} className={`flex items-start gap-3 p-2.5 bg-white border rounded cursor-pointer hover:bg-gray-50 ${prereqMissing ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200'}`}>
+                                    <input type="checkbox" checked={selectedSubjectIds.includes(c.subject_id)} onChange={() => setSelectedSubjectIds((prev) => prev.includes(c.subject_id) ? prev.filter((id) => id !== c.subject_id) : [...prev, c.subject_id])} className="mt-0.5" />
+                                    <div className="flex-1">
+                                      <p className="m-0 text-sm font-medium text-gray-800">{c.subject?.code} – {c.subject?.title}</p>
+                                      <p className="m-0 text-xs text-gray-500">{c.subject?.units} units · Yr {c.year_level} · Sem {c.semester}</p>
+                                      {prereqMissing && (
+                                        <p className="m-0 text-xs text-yellow-700 font-medium mt-0.5">
+                                          Prereq: {c.prerequisite?.code || `Subject #${c.prerequisite?.id}`} not yet completed
+                                        </p>
+                                      )}
+                                    </div>
+                                  </label>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -1375,8 +1428,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                         <label className="text-sm font-medium text-gray-600">
                           Academic Year *
                         </label>
-                        <input
-                          type="text"
+                        <select
                           value={gradeForm.academic_year}
                           onChange={(e) =>
                             setGradeForm((p) => ({
@@ -1384,9 +1436,13 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                               academic_year: e.target.value,
                             }))
                           }
-                          placeholder="e.g. 2025-2026"
-                          className={`${inputBase} ${gradeErrors.academic_year ? inputError : inputNormal} w-32`}
-                        />
+                          className={`${inputBase} ${gradeErrors.academic_year ? inputError : inputNormal} w-36`}
+                        >
+                          <option value="">Select year</option>
+                          {ACADEMIC_YEAR_OPTIONS.map((yr) => (
+                            <option key={yr} value={yr}>{yr}</option>
+                          ))}
+                        </select>
                         {gradeErrors.academic_year && (
                           <span className="text-xs text-red-600">
                             {gradeErrors.academic_year}
