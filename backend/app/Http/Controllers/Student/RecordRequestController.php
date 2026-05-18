@@ -7,8 +7,11 @@ use App\Http\Controllers\Concerns\AuthorizesRole;
 use App\Http\Requests\StoreRecordRequestRequest;
 use App\Models\RecordRequest;
 use App\Models\Student;
+use App\Models\SystemLog;
+use App\Services\OfficialTranscriptExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Student: submit record request and view own requests.
@@ -61,13 +64,14 @@ class RecordRequestController extends Controller
 
         $validated = $request->validated();
         $validated['student_id'] = $student->student_id;
+        $validated['record_type'] = 'official_transcript';
         $validated['status'] = RecordRequest::STATUS_PENDING;
         $validated['requested_at'] = now();
         $validated['copies'] = $validated['copies'] ?? 1;
 
         $recordRequest = RecordRequest::create($validated);
         SystemLog::create([
-            'action' => 'Record request submitted',
+            'action' => 'Official transcript request submitted',
             'user_id' => $request->user()->id,
             'role' => $request->user()->roles->first()?->name ?? $request->user()->role ?? null,
         ]);
@@ -100,5 +104,34 @@ class RecordRequestController extends Controller
         }
 
         return response()->json(['record_request' => $recordRequest]);
+    }
+
+    /**
+     * Download the official transcript PDF for an approved/released request (student only).
+     */
+    public function downloadTranscript(Request $request, int $id): StreamedResponse|JsonResponse
+    {
+        if ($err = $this->requireAuth()) {
+            return $err;
+        }
+        if ($err = $this->requireRoles($request->user(), ['student'])) {
+            return $err;
+        }
+
+        $student = $request->user()->student;
+        if (! $student) {
+            return response()->json(['message' => 'Student record not found.'], 403);
+        }
+
+        $recordRequest = RecordRequest::where('student_id', $student->student_id)->find($id);
+        if (! $recordRequest) {
+            return response()->json(['message' => 'Record request not found.'], 404);
+        }
+
+        if (! in_array($recordRequest->status, [RecordRequest::STATUS_APPROVED, RecordRequest::STATUS_RELEASED], true)) {
+            return response()->json(['message' => 'Transcript is only available once your request has been approved.'], 422);
+        }
+
+        return app(OfficialTranscriptExportService::class)->streamForStudent($student);
     }
 }

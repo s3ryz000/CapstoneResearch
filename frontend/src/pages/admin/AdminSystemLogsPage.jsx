@@ -10,6 +10,8 @@ import {
   FiChevronDown,
   FiChevronLeft,
   FiChevronRight,
+  FiDownload,
+  FiPrinter,
 } from "react-icons/fi";
 import { adminToast } from "../../lib/notifications";
 import { parseApiError } from "../../lib/api/errors";
@@ -44,6 +46,43 @@ const AdminSystemLogsPage = () => {
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch, filterRole, entries, sortKey, sortDir]);
+
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPdf = async () => {
+    setExporting(true);
+    try {
+      const blob = await adminApi.exportSystemLogsPdf();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `AUDIT_LOG_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      adminToast.success("Export ready", "Audit log PDF downloaded.");
+    } catch {
+      adminToast.error("Export failed", "Could not generate audit log PDF.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handlePrint = async () => {
+    setExporting(true);
+    try {
+      const blob = await adminApi.exportSystemLogsPdf();
+      const url  = URL.createObjectURL(blob);
+      const win  = window.open(url, "_blank");
+      if (!win) adminToast.warning("Pop-up blocked", "Allow pop-ups to print the audit log.");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      adminToast.error("Print failed", "Could not load audit log for printing.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const listQuery = useAdminViewSystemLogs({ page, entries });
   const { data, isLoading, isFetching } = listQuery;
@@ -95,6 +134,26 @@ const AdminSystemLogsPage = () => {
           <p className="mt-1 m-0 text-gray-600 text-sm">
             View and manage system logs.
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={exporting}
+            className="inline-flex items-center gap-2 py-2 px-4 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <FiPrinter className="w-4 h-4" />
+            Print Audit Log
+          </button>
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={exporting}
+            className="inline-flex items-center gap-2 py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium hover:bg-tmcc-dark disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <FiDownload className="w-4 h-4" />
+            {exporting ? "Generating…" : "Export PDF"}
+          </button>
         </div>
       </section>
 

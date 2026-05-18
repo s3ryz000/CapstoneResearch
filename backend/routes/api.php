@@ -92,6 +92,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::put('/users/{id}', [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
     Route::get('/logs', [SystemLogController::class, 'index']);
+    Route::get('/logs/export-pdf', [SystemLogController::class, 'exportPdf']);
 });
 
 // ---- Admin only: System settings ----
@@ -120,5 +121,6 @@ Route::middleware(['auth:sanctum', 'role:student'])->prefix('student')->group(fu
     Route::get('/record-requests', [RecordRequestController::class, 'index']);
     Route::post('/record-requests', [RecordRequestController::class, 'store']);
     Route::get('/record-requests/{id}', [RecordRequestController::class, 'show']);
+    Route::get('/record-requests/{id}/transcript', [RecordRequestController::class, 'downloadTranscript']);
     Route::get('/record-requests/{id}/approval-slip', [RequestController::class, 'downloadApprovalSlipStudent']);
 });

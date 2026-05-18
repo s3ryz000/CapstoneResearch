@@ -51,4 +51,11 @@ export const studentApi = {
     });
     return response;
   },
+
+  downloadTranscript: async (id) => {
+    const response = await apiClient.get(`/student/record-requests/${id}/transcript`, {
+      responseType: 'blob',
+    });
+    return response;
+  },
 };

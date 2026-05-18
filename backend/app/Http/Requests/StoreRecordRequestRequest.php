@@ -14,9 +14,16 @@ class StoreRecordRequestRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'record_type' => ['required', 'string', 'max:50'],
+            'record_type' => ['required', 'string', 'in:official_transcript'],
             'purpose' => ['nullable', 'string', 'max:255'],
             'copies' => ['nullable', 'integer', 'min:1', 'max:10'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'record_type.in' => 'Only Official Transcript of Record requests are accepted.',
         ];
     }
 }

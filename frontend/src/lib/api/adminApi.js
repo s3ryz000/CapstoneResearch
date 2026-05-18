@@ -53,4 +53,9 @@ export const adminApi = {
     const { data } = await apiClient.get('/admin/logs', { params });
     return data;
   },
+
+  exportSystemLogsPdf: async () => {
+    const { data } = await apiClient.get('/admin/logs/export-pdf', { responseType: 'blob' });
+    return data;
+  },
 };

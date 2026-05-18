@@ -265,6 +265,16 @@ class StudentController extends Controller
         $name = trim($validated['first_name'] . ' ' . $validated['last_name']);
         $email = $validated['email'];
 
+        $trackFields = [
+            'student_number', 'first_name', 'last_name', 'middle_name',
+            'date_of_birth', 'sex', 'email', 'contact_number', 'address',
+            'enrollment_date', 'graduation_date', 'GPA',
+        ];
+        $oldValues = [];
+        foreach ($trackFields as $field) {
+            $oldValues[$field] = $student->getAttribute($field);
+        }
+
         DB::transaction(function () use ($student, $validated, $studentNumber, $name, $email) {
             $student->update($validated);
 
@@ -278,10 +288,22 @@ class StudentController extends Controller
         });
 
         $student->refresh();
+
+        $changed = [];
+        foreach ($trackFields as $field) {
+            $newVal = $validated[$field] ?? null;
+            if ((string) ($oldValues[$field] ?? '') !== (string) ($newVal ?? '')) {
+                $changed[] = str_replace('_', ' ', $field);
+            }
+        }
+
+        $changedStr = $changed ? implode(', ', $changed) : 'no changes';
+        $ip         = $request->ip();
+
         SystemLog::create([
-            'action' => 'Student updated',
+            'action'  => "Student {$studentNumber} ({$name}) record updated by staff — fields: {$changedStr} [IP: {$ip}]",
             'user_id' => $user->id,
-            'role' => $role,
+            'role'    => $role,
         ]);
         return response()->json([
             'message' => 'Student updated successfully.',

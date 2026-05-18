@@ -98,6 +98,8 @@ const StaffLayout = () => {
 
   const navItemsBeforeRegistrar = [
     { id: 'dashboard', label: 'Dashboard', icon: FiGrid, path: '/staff' },
+    { id: 'requests', label: 'Transcript Requests', icon: FiInbox, path: '/staff/requests' },
+    { id: 'document-release', label: 'Document Release', icon: FiPackage, path: '/staff/document-release' },
   ];
 
   const registrarSubItems = [
@@ -126,7 +128,10 @@ const StaffLayout = () => {
     const { id, label, icon: Icon, path } = item;
     const isActive =
       !isNewStudentPage &&
-      (pathname === path || (path === '/staff/students' && pathname.startsWith('/staff/students')));
+      (pathname === path ||
+        (path === '/staff/students' && pathname.startsWith('/staff/students')) ||
+        (path === '/staff/requests' && pathname === '/staff/requests') ||
+        (path === '/staff/document-release' && pathname === '/staff/document-release'));
     return (
       <Link
         key={id}
@@ -292,10 +297,13 @@ const StaffLayout = () => {
           </div>
           <div className="flex items-center gap-4">
             {kpi.pendingRequests > 0 && (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
+              <Link
+                to="/staff/requests"
+                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium hover:bg-amber-200 transition-colors no-underline"
+              >
                 <FiInbox className="w-3 h-3" />
                 <span>Pending: {kpi.pendingRequests}</span>
-              </span>
+              </Link>
             )}
             <span className="text-sm font-medium text-gray-700">{staffName}</span>
             <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">

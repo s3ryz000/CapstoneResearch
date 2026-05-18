@@ -211,13 +211,49 @@ class StudentProfileController extends Controller
             return response()->json(['message' => 'Student record not found.'], 404);
         }
 
-        $student->update($request->validated());
+        $validated = $request->validated();
+
+        $fieldLabels = [
+            'contact_number'    => 'contact number',
+            'address'           => 'address',
+            'place_of_birth'    => 'place of birth',
+            'sex'               => 'sex',
+            'guardian_name'     => 'guardian name',
+            'citizenship'       => 'citizenship',
+            'elementary_school' => 'elementary school',
+            'elementary_year'   => 'elementary graduation year',
+            'high_school'       => 'high school',
+            'high_school_year'  => 'high school graduation year',
+            'previous_school'   => 'previous school',
+            'previous_course'   => 'previous course',
+        ];
+
+        $oldValues = [];
+        foreach (array_keys($validated) as $field) {
+            $oldValues[$field] = $student->getAttribute($field);
+        }
+
+        $student->update($validated);
         $student->refresh();
+
+        $changed = [];
+        foreach ($validated as $field => $newVal) {
+            if ((string) ($oldValues[$field] ?? '') !== (string) ($newVal ?? '')) {
+                $changed[] = $fieldLabels[$field] ?? str_replace('_', ' ', $field);
+            }
+        }
+
+        $studentName   = trim($student->first_name . ' ' . $student->last_name);
+        $studentNumber = $student->student_number ?? "ID#{$student->id}";
+        $changedStr    = $changed ? implode(', ', $changed) : 'no changes';
+        $ip            = $request->ip();
+
         SystemLog::create([
-            'action' => 'SIS updated',
+            'action'  => "Student {$studentNumber} ({$studentName}) updated profile: {$changedStr} [IP: {$ip}]",
             'user_id' => $request->user()->id,
-            'role' => $request->user()->roles->first()?->name ?? $request->user()->role ?? null,
+            'role'    => $request->user()->roles->first()?->name ?? $request->user()->role ?? null,
         ]);
+
         return response()->json([
             'message' => 'SIS updated successfully.',
             'student' => $student->load('program'),
