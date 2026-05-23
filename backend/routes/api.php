@@ -49,6 +49,11 @@ Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(
     Route::get('/programs/{id}/curriculum', [StudentController::class, 'programSubjects']);
     
 
+    // Academic Progression endpoints (defined first to prevent wildcard parameter conflict)
+    Route::get('/students/{id}/academic-progress', [StudentController::class, 'academicProgress']);
+    Route::post('/students/{id}/enrollments/add-next-term', [StudentController::class, 'addNextTerm']);
+    Route::put('/students/{id}/grades/bulk-update', [StudentController::class, 'bulkUpdateGrades']);
+
     Route::get('/students', [StudentController::class, 'index']);
     Route::post('/students', [StudentController::class, 'store']);
     Route::post('/students/{id}/archive', [StudentController::class, 'archiveStudent']);
@@ -113,6 +118,7 @@ Route::middleware(['auth:sanctum', 'role:student'])->prefix('student')->group(fu
     Route::get('/subjects', [StudentProfileController::class, 'subjects']);
     Route::get('/grades', [StudentProfileController::class, 'grades']);
     Route::get('/curriculum', [StudentProfileController::class, 'curriculum']);
+    Route::get('/academic-summary', [StudentProfileController::class, 'academicSummary']);
     Route::put('/sis', [StudentProfileController::class, 'updateSis']);
 });
 

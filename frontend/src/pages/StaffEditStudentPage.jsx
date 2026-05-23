@@ -11,6 +11,7 @@ import {
 import { staffApi } from "../lib/api/staffApi";
 import { staffToast } from "../lib/notifications";
 import { queryKeys } from "../lib/react-query/queryKeys";
+import AcademicProgressionStep4 from "../components/AcademicProgressionStep4";
 
 const defaultForm = {
   student_number: "",
@@ -23,7 +24,7 @@ const defaultForm = {
   address: "",
   enrollment_date: "",
   graduation_date: "",
-  GPA: "",
+
 };
 
 const TOTAL_PHASES = 4;
@@ -133,7 +134,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
           });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   };
 
   useEffect(() => {
@@ -146,8 +147,8 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         last_name: s.last_name ?? parts.slice(1).join(" ") ?? "",
         date_of_birth: formatDateForInput(s.date_of_birth),
         sex: s.sex === 'Male' || s.sex === 'male' ? 'M'
-           : s.sex === 'Female' || s.sex === 'female' ? 'F'
-           : (s.sex ?? ""),
+          : s.sex === 'Female' || s.sex === 'female' ? 'F'
+            : (s.sex ?? ""),
         email: s.email ?? "",
         contact_number: s.contact_number ?? "",
         address: s.address ?? "",
@@ -155,7 +156,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
           formatDateForInput(s.enrollment_date) ||
           new Date().toISOString().slice(0, 10),
         graduation_date: formatDateForInput(s.graduation_date),
-        GPA: s.GPA != null ? String(s.GPA) : "",
+
       });
       setStudentDetail({
         enrollments: s.enrollments || [],
@@ -178,6 +179,23 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
     }
 
     setFetchLoading(true);
+    // Clear drafts to prevent state leaks between students
+    setStudentDetail({ enrollments: [], grades: [] });
+    setSelectedSubjectIds([]);
+    setEnrollmentForm({
+      academic_year: CURRENT_ACADEMIC_YEAR,
+      semester: "1st",
+      year_level: "",
+      status: "enrolled",
+    });
+    setGradeForm({
+      subject_id: "",
+      academic_year: "",
+      semester: "1st",
+      grade_value: "",
+      remarks: "",
+    });
+
     staffApi
       .getStudentById(id)
       .then((res) => {
@@ -242,14 +260,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
     if (phase === 3) {
       if (!form.enrollment_date)
         err.enrollment_date = "Enrollment date is required.";
-      if (
-        form.GPA !== "" &&
-        (isNaN(parseFloat(form.GPA)) ||
-          parseFloat(form.GPA) < 0 ||
-          parseFloat(form.GPA) > 5)
-      ) {
-        err.GPA = "GPA must be between 0 and 5.00.";
-      }
+
     }
     setErrors(err);
     return Object.keys(err).length === 0;
@@ -268,14 +279,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
       err.email = "Enter a valid email.";
     if (!form.enrollment_date)
       err.enrollment_date = "Enrollment date is required.";
-    if (
-      form.GPA !== "" &&
-      (isNaN(parseFloat(form.GPA)) ||
-        parseFloat(form.GPA) < 0 ||
-        parseFloat(form.GPA) > 5)
-    ) {
-      err.GPA = "GPA must be between 0 and 5.00.";
-    }
+
     setErrors(err);
     return Object.keys(err).length === 0;
   };
@@ -628,7 +632,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         address: form.address?.trim() || null,
         enrollment_date: form.enrollment_date,
         graduation_date: form.graduation_date || null,
-        GPA: form.GPA !== "" ? parseFloat(form.GPA) : null,
+
       });
       queryClient.invalidateQueries({
         queryKey: [...queryKeys.staff.all, "students"],
@@ -700,11 +704,10 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                 <button
                   type="button"
                   onClick={() => goToPhase(phase)}
-                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-tmcc/50 ${
-                    currentPhase === phase || currentPhase > phase
-                      ? "bg-tmcc text-white hover:bg-tmcc-dark"
-                      : "bg-gray-200 text-gray-600 hover:bg-gray-300"
-                  }`}
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-tmcc/50 ${currentPhase === phase || currentPhase > phase
+                    ? "bg-tmcc text-white hover:bg-tmcc-dark"
+                    : "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                    }`}
                   aria-pressed={currentPhase === phase}
                   aria-label={`Step ${phase}`}
                 >
@@ -726,7 +729,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
             ))}
           </div>
 
-          <div className="max-w-[720px]">
+          <div className="w-full max-w-full mx-auto">
             {currentPhase === 1 && (
               <div className="mb-8 p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
                 <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
@@ -881,7 +884,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                       type="email"
                       value={form.email}
                       onChange={handleChange}
-                      placeholder="student@tmcc.edu.ph"
+                      placeholder="[EMAIL_ADDRESS]"
                       maxLength={100}
                       className={`${inputBase} ${errors.email ? inputError : inputNormal}`}
                       aria-invalid={!!errors.email}
@@ -979,555 +982,21 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                       className={`${inputBase} ${inputNormal}`}
                     />
                   </div>
-                  <div className="flex flex-col gap-1.5 max-w-[120px]">
-                    <label
-                      htmlFor="GPA"
-                      className="text-sm font-medium text-gray-600"
-                    >
-                      GPA (optional)
-                    </label>
-                    <input
-                      id="GPA"
-                      name="GPA"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="5"
-                      value={form.GPA}
-                      onChange={handleChange}
-                      placeholder="0.00–5.00"
-                      className={`${inputBase} ${errors.GPA ? inputError : inputNormal}`}
-                      aria-invalid={!!errors.GPA}
-                    />
-                    {errors.GPA && (
-                      <span className="text-xs text-red-600">{errors.GPA}</span>
-                    )}
-                  </div>
                 </div>
               </div>
             )}
 
             {currentPhase === 4 && (
-              <div className="mb-8 space-y-6">
-
-                {/* ── Student Program Card ── */}
-                <div className="p-6 bg-white rounded-xl border-l-4 border-blue-500 shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
-                  <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">Student Program</h4>
-                  <div className="flex flex-wrap items-center gap-4">
-                    <div className="flex flex-col gap-1 flex-1 min-w-[240px]">
-                      <label className="text-sm font-medium text-gray-600">Active Program</label>
-                      <select
-                        value={studentProgram?.id ?? ""}
-                        onChange={(e) => handleProgramDropdownChange(e.target.value)}
-                        className={`${inputBase} ${inputNormal}`}
-                        disabled={programChangeLoading}
-                      >
-                        <option value="">— Select Program —</option>
-                        {programs.map((p) => (
-                          <option key={p.id} value={p.id}>{p.code} – {p.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {studentProgram?.id && (
-                      <div className="flex-1 min-w-[200px] p-3 bg-blue-50 rounded-lg border border-blue-200">
-                        <p className="m-0 text-xs text-blue-600 font-medium uppercase tracking-wide">Current Active Program</p>
-                        <p className="m-0 mt-1 text-sm font-semibold text-blue-900">
-                          {studentProgram.code ? `${studentProgram.code} – ${studentProgram.name}` : `Program ID: ${studentProgram.id}`}
-                        </p>
-                        <p className="m-0 mt-0.5 text-xs text-blue-700">To change this program, select a different one above.</p>
-                      </div>
-                    )}
-                  </div>
-                  {!studentProgram?.id && (
-                    <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 m-0">
-                      ⚠ No active program set. Please select a program before adding subject enrollments.
-                    </p>
-                  )}
-                </div>
-
-                {/* ── Subject Enrollments ── */}
-                <div className="p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
-                  <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">Subject Enrollments</h4>
-                  {studentDetail.enrollments.filter((e) => e.status !== 'archived').length > 0 ? (
-                    <div className="overflow-x-auto mb-4">
-                      <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">Subject</th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">Academic Year</th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">Sem</th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">Status</th>
-                            <th className="text-right py-2 px-3 border-b border-gray-200">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {/* Active enrollments */}
-                          {studentDetail.enrollments
-                            .filter((enr) => enr.status !== 'archived')
-                            .map((enr) => (
-                            <tr key={enr.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                              <td className="py-2 px-3">{enr.subject ? `${enr.subject.code} – ${enr.subject.title}` : enr.subject_id}</td>
-                              <td className="py-2 px-3">{enr.academic_year}</td>
-                              <td className="py-2 px-3">{enr.semester}</td>
-                              <td className="py-2 px-3 capitalize">
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                  enr.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                  enr.status === 'dropped' ? 'bg-red-100 text-red-600' :
-                                  'bg-blue-100 text-blue-700'
-                                }`}>
-                                  {enr.status}
-                                </span>
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                <button type="button" onClick={() => startEditEnrollment(enr)} className="text-tmcc hover:underline mr-2" aria-label="Edit enrollment"><FiEdit2 className="inline" /></button>
-                                <button type="button" onClick={() => handleDeleteEnrollment(enr.id)} className="text-red-600 hover:underline" aria-label="Delete enrollment"><FiTrash2 className="inline" /></button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-sm mb-4">No active enrollments yet. Add one below.</p>
-                  )}
-
-                  {/* Archived enrollments section */}
-                  {studentDetail.enrollments.filter((e) => e.status === 'archived').length > 0 && (
-                    <details className="mt-3 mb-4">
-                      <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">
-                        Show archived/removed enrollments ({studentDetail.enrollments.filter((e) => e.status === 'archived').length})
-                      </summary>
-                      <div className="overflow-x-auto mt-2">
-                        <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden opacity-60">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="text-left py-2 px-3 border-b border-gray-200">Subject</th>
-                              <th className="text-left py-2 px-3 border-b border-gray-200">Academic Year</th>
-                              <th className="text-left py-2 px-3 border-b border-gray-200">Sem</th>
-                              <th className="text-left py-2 px-3 border-b border-gray-200">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {studentDetail.enrollments
-                              .filter((e) => e.status === 'archived')
-                              .map((enr) => (
-                                <tr key={enr.id} className="border-b border-gray-100">
-                                  <td className="py-2 px-3">{enr.subject ? `${enr.subject.code} – ${enr.subject.title}` : enr.subject_id}</td>
-                                  <td className="py-2 px-3">{enr.academic_year}</td>
-                                  <td className="py-2 px-3">{enr.semester}</td>
-                                  <td className="py-2 px-3"><span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">archived</span></td>
-                                </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </details>
-                  )}
-
-                  {editingEnrollmentId ? (
-                    <form onSubmit={handleUpdateEnrollment} className="flex flex-wrap items-end gap-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
-                      <span className="text-sm text-amber-800 font-medium w-full">Editing enrollment status</span>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">Status</label>
-                        <select value={enrollmentForm.status} onChange={(e) => setEnrollmentForm((p) => ({ ...p, status: e.target.value }))} className={`${inputBase} ${inputNormal} min-w-[140px]`}>
-                          {ENROLLMENT_STATUS_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-                        </select>
-                      </div>
-                      <button type="submit" className="py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium">Save</button>
-                      <button type="button" onClick={() => { setEditingEnrollmentId(null); setEnrollmentForm({ academic_year: CURRENT_ACADEMIC_YEAR, semester: "1st", year_level: "", status: "enrolled" }); }} className="py-2 px-4 rounded-lg bg-gray-500 text-white text-sm">Cancel</button>
-                    </form>
-                  ) : !studentProgram?.id ? (
-                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 m-0">Set a Student Program above before adding enrollments.</p>
-                  ) : (
-                    <form onSubmit={handleAddEnrollment} className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <p className="m-0 text-sm font-semibold text-gray-700">Add Enrollment — <span className="text-tmcc">{studentProgram?.code || `Program ID ${studentProgram?.id}`}</span> subjects only</p>
-                      <div className="flex flex-wrap items-end gap-3">
-                        <div className="flex flex-col gap-1">
-                          <label className="text-sm font-medium text-gray-600">Year Level *</label>
-                          <select
-                            value={enrollmentForm.year_level}
-                            onChange={(e) => {
-                              const yl = e.target.value;
-                              setEnrollmentForm((p) => ({ ...p, year_level: yl }));
-                              fetchCurriculum(yl, enrollmentForm.semester);
-                            }}
-                            className={`${inputBase} ${enrollmentErrors.year_level ? inputError : inputNormal} min-w-[140px]`}
-                          >
-                            <option value="">Select year</option>
-                            {[{n:"1st",v:1},{n:"2nd",v:2},{n:"3rd",v:3},{n:"4th",v:4}].map((l) => <option key={l.v} value={l.v}>{l.n}</option>)}
-                          </select>
-                          {enrollmentErrors.year_level && <span className="text-xs text-red-600">{enrollmentErrors.year_level}</span>}
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <label className="text-sm font-medium text-gray-600">Semester *</label>
-                          <select
-                            value={enrollmentForm.semester}
-                            onChange={(e) => {
-                              const sem = e.target.value;
-                              setEnrollmentForm((p) => ({ ...p, semester: sem }));
-                              fetchCurriculum(enrollmentForm.year_level, sem);
-                            }}
-                            className={`${inputBase} ${enrollmentErrors.semester ? inputError : inputNormal} min-w-[100px]`}
-                          >
-                            {SEMESTER_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-                          </select>
-                          {enrollmentErrors.semester && <span className="text-xs text-red-600">{enrollmentErrors.semester}</span>}
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <label className="text-sm font-medium text-gray-600">Academic Year *</label>
-                          <select
-                            value={enrollmentForm.academic_year}
-                            onChange={(e) => setEnrollmentForm((p) => ({ ...p, academic_year: e.target.value }))}
-                            className={`${inputBase} ${enrollmentErrors.academic_year ? inputError : inputNormal} w-36`}
-                          >
-                            <option value="">Select year</option>
-                            {ACADEMIC_YEAR_OPTIONS.map((yr) => (
-                              <option key={yr} value={yr}>{yr}</option>
-                            ))}
-                          </select>
-                          {enrollmentErrors.academic_year && <span className="text-xs text-red-600">{enrollmentErrors.academic_year}</span>}
-                        </div>
-                      </div>
-
-                      {/* Curriculum Subject Checklist */}
-                      {enrollmentForm.year_level && (
-                        <div className="mt-3">
-                          <p className="m-0 mb-2 text-sm font-medium text-gray-700">
-                            Curriculum Subjects {curriculumLoading && <span className="text-xs text-gray-400 ml-1">Loading...</span>}
-                          </p>
-                          {enrollmentErrors.subject_ids && <p className="m-0 mb-2 text-xs text-red-600">{enrollmentErrors.subject_ids}</p>}
-                          {enrollmentErrors.prerequisites && <p className="m-0 mb-2 text-xs text-red-600">{enrollmentErrors.prerequisites}</p>}
-                          {!curriculumLoading && curriculumSubjects.length === 0 && (
-                            <p className="text-sm text-gray-500">No subjects found for this year level and semester.</p>
-                          )}
-                          {curriculumSubjects.length > 0 && (
-                            <div className="grid grid-cols-1 gap-1.5 max-h-60 overflow-y-auto pr-1">
-                              {curriculumSubjects.map((c) => {
-                                const prereqMissing = c.prerequisite && !passedSubjectIds.has(c.prerequisite.id);
-                                return (
-                                  <label key={c.id} className={`flex items-start gap-3 p-2.5 bg-white border rounded cursor-pointer hover:bg-gray-50 ${prereqMissing ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200'}`}>
-                                    <input type="checkbox" checked={selectedSubjectIds.includes(c.subject_id)} onChange={() => setSelectedSubjectIds((prev) => prev.includes(c.subject_id) ? prev.filter((id) => id !== c.subject_id) : [...prev, c.subject_id])} className="mt-0.5" />
-                                    <div className="flex-1">
-                                      <p className="m-0 text-sm font-medium text-gray-800">{c.subject?.code} – {c.subject?.title}</p>
-                                      <p className="m-0 text-xs text-gray-500">{c.subject?.units} units · Yr {c.year_level} · Sem {c.semester}</p>
-                                      {prereqMissing && (
-                                        <p className="m-0 text-xs text-yellow-700 font-medium mt-0.5">
-                                          Prereq: {c.prerequisite?.code || `Subject #${c.prerequisite?.id}`} not yet completed
-                                        </p>
-                                      )}
-                                    </div>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {enrollmentErrors.program && <p className="text-xs text-red-600 m-0">{enrollmentErrors.program}</p>}
-                      <button type="submit" className="inline-flex items-center gap-1 py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium">
-                        <FiPlus className="inline" /> Add Enrollment
-                      </button>
-                    </form>
-                  )}
-                </div>
-
-                {/* Grades */}
-                <div className="p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
-                  <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">
-                    Grades
-                  </h4>
-                  {studentDetail.grades.length > 0 ? (
-                    <div className="overflow-x-auto mb-4">
-                      <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Subject
-                            </th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Academic Year
-                            </th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Semester
-                            </th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Grade
-                            </th>
-                            <th className="text-left py-2 px-3 border-b border-gray-200">
-                              Remarks
-                            </th>
-                            <th className="text-right py-2 px-3 border-b border-gray-200">
-                              Actions
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {studentDetail.grades.map((g) => (
-                            <tr
-                              key={g.id}
-                              className="border-b border-gray-100 hover:bg-gray-50/50"
-                            >
-                              <td className="py-2 px-3">
-                                {g.subject
-                                  ? `${g.subject.code} – ${g.subject.title}`
-                                  : g.subject_id}
-                              </td>
-                              <td className="py-2 px-3">{g.academic_year}</td>
-                              <td className="py-2 px-3">{g.semester}</td>
-                              <td className="py-2 px-3">
-                                {g.grade_value != null
-                                  ? Number(g.grade_value)
-                                  : "—"}
-                              </td>
-                              <td className="py-2 px-3">{g.remarks || "—"}</td>
-                              <td className="py-2 px-3 text-right">
-                                <button
-                                  type="button"
-                                  onClick={() => startEditGrade(g)}
-                                  className="text-tmcc hover:underline mr-2"
-                                  aria-label="Edit grade"
-                                >
-                                  <FiEdit2 className="inline" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteGrade(g.id)}
-                                  className="text-red-600 hover:underline"
-                                  aria-label="Delete grade"
-                                >
-                                  <FiTrash2 className="inline" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-sm mb-4">
-                      No grades yet. Add one below.
-                    </p>
-                  )}
-                  {editingGradeId ? (
-                    <form
-                      onSubmit={handleUpdateGrade}
-                      className="flex flex-wrap items-end gap-3 p-3 bg-amber-50 rounded-lg border border-amber-200"
-                    >
-                      <span className="text-sm text-amber-800 font-medium w-full">
-                        Editing grade
-                      </span>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Grade value (optional)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="5"
-                          value={gradeForm.grade_value}
-                          onChange={(e) =>
-                            setGradeForm((p) => ({
-                              ...p,
-                              grade_value: e.target.value,
-                            }))
-                          }
-                          placeholder="0–5"
-                          className={`${inputBase} ${gradeErrors.grade_value ? inputError : inputNormal} w-24`}
-                        />
-                        {gradeErrors.grade_value && (
-                          <span className="text-xs text-red-600">
-                            {gradeErrors.grade_value}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Remarks (optional)
-                        </label>
-                        <input
-                          type="text"
-                          value={gradeForm.remarks}
-                          onChange={(e) =>
-                            setGradeForm((p) => ({
-                              ...p,
-                              remarks: e.target.value,
-                            }))
-                          }
-                          placeholder="Passed, Failed, INC"
-                          maxLength={50}
-                          className={`${inputBase} ${inputNormal} w-32`}
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        className="py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium"
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingGradeId(null);
-                          setGradeForm({
-                            subject_id: "",
-                            academic_year: "",
-                            semester: "1st",
-                            grade_value: "",
-                            remarks: "",
-                          });
-                        }}
-                        className="py-2 px-4 rounded-lg bg-gray-500 text-white text-sm"
-                      >
-                        Cancel
-                      </button>
-                    </form>
-                  ) : (
-                    <form
-                      onSubmit={handleAddGrade}
-                      className="flex flex-wrap items-end gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200"
-                    >
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Subject *
-                        </label>
-                        <select
-                          value={gradeForm.subject_id}
-                          onChange={(e) =>
-                            setGradeForm((p) => ({
-                              ...p,
-                              subject_id: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${
-                            gradeErrors.subject_id ? inputError : inputNormal
-                          } min-w-[200px]`}
-                          required
-                        >
-                          <option value="">Select subject</option>
-
-                          {studentDetail.enrollments.map((enr) => (
-                            <option
-                              key={enr.subject?.id || enr.subject_id}
-                              value={enr.subject?.id || enr.subject_id}
-                            >
-                              {enr.subject
-                                ? `${enr.subject.code} – ${enr.subject.title}`
-                                : enr.subject_id}
-                            </option>
-                          ))}
-                        </select>
-                        {gradeErrors.subject_id && (
-                          <span className="text-xs text-red-600">
-                            {gradeErrors.subject_id}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Academic Year *
-                        </label>
-                        <select
-                          value={gradeForm.academic_year}
-                          onChange={(e) =>
-                            setGradeForm((p) => ({
-                              ...p,
-                              academic_year: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${gradeErrors.academic_year ? inputError : inputNormal} w-36`}
-                        >
-                          <option value="">Select year</option>
-                          {ACADEMIC_YEAR_OPTIONS.map((yr) => (
-                            <option key={yr} value={yr}>{yr}</option>
-                          ))}
-                        </select>
-                        {gradeErrors.academic_year && (
-                          <span className="text-xs text-red-600">
-                            {gradeErrors.academic_year}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Semester *
-                        </label>
-                        <select
-                          value={gradeForm.semester}
-                          onChange={(e) =>
-                            setGradeForm((p) => ({
-                              ...p,
-                              semester: e.target.value,
-                            }))
-                          }
-                          className={`${inputBase} ${gradeErrors.semester ? inputError : inputNormal} min-w-[100px]`}
-                        >
-                          {SEMESTER_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                        {gradeErrors.semester && (
-                          <span className="text-xs text-red-600">
-                            {gradeErrors.semester}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Grade value (optional)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="5"
-                          value={gradeForm.grade_value}
-                          onChange={(e) =>
-                            setGradeForm((p) => ({
-                              ...p,
-                              grade_value: e.target.value,
-                            }))
-                          }
-                          placeholder="0–5"
-                          className={`${inputBase} ${gradeErrors.grade_value ? inputError : inputNormal} w-24`}
-                        />
-                        {gradeErrors.grade_value && (
-                          <span className="text-xs text-red-600">
-                            {gradeErrors.grade_value}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium text-gray-600">
-                          Remarks (optional)
-                        </label>
-                        <input
-                          type="text"
-                          value={gradeForm.remarks}
-                          onChange={(e) =>
-                            setGradeForm((p) => ({
-                              ...p,
-                              remarks: e.target.value,
-                            }))
-                          }
-                          placeholder="Passed, Failed, INC"
-                          maxLength={50}
-                          className={`${inputBase} ${inputNormal} w-32`}
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        className="inline-flex items-center gap-1 py-2 px-4 rounded-lg bg-tmcc text-white text-sm font-medium"
-                      >
-                        <FiPlus className="inline" /> Add Grade
-                      </button>
-                    </form>
-                  )}
-                </div>
-              </div>
+              <AcademicProgressionStep4
+                studentId={studentId}
+                studentProgram={studentProgram}
+                programs={programs}
+                handleProgramDropdownChange={handleProgramDropdownChange}
+                programChangeLoading={programChangeLoading}
+                inputBase={inputBase}
+                inputNormal={inputNormal}
+                inputError={inputError}
+              />
             )}
 
             <div className="flex gap-4 mt-6 pt-4 border-t border-gray-200">
@@ -1688,9 +1157,8 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                   performDeleteEnrollment(deleteModal.confirmed);
                 }}
                 disabled={deleteModal.loading}
-                className={`flex-1 py-2 px-4 rounded-lg text-white text-sm font-medium disabled:opacity-70 ${
-                  deleteModal.hasGrade ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'
-                }`}
+                className={`flex-1 py-2 px-4 rounded-lg text-white text-sm font-medium disabled:opacity-70 ${deleteModal.hasGrade ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
               >
                 {deleteModal.loading ? "Removing..." : deleteModal.hasGrade ? "Confirm — Archive Enrollment" : "Remove Enrollment"}
               </button>

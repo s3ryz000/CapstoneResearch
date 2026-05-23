@@ -31,7 +31,10 @@ class AccountSeeder extends Seeder
          
         ];
         foreach ($users as $userData) {
-            $user = User::create($userData);
+            $user = User::firstOrCreate(
+                ['username' => $userData['username']],
+                $userData
+            );
             $user->assignRole($userData['role']);
         }
         echo "Accounts created successfully\n";

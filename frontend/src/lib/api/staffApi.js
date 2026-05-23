@@ -178,4 +178,29 @@ export const staffApi = {
     const { data } = await apiClient.post(`/staff/students/${studentId}/archive`, payload);
     return data;
   },
+
+  // ── Academic Progression endpoints ──
+
+  /** Get full academic progress for a student (staff/admin). */
+  getAcademicProgress: async (studentId) => {
+    const { data } = await apiClient.get(`/staff/students/${studentId}/academic-progress`);
+    return data;
+  },
+
+  getAcademicSummary: async (studentId) => {
+    const { data } = await apiClient.get(`/staff/students/${studentId}/academic-summary`);
+    return data;
+  },
+
+  /** Add enrollment for the next allowed term. Backend computes term. */
+  addNextTerm: async (studentId, payload) => {
+    const { data } = await apiClient.post(`/staff/students/${studentId}/enrollments/add-next-term`, payload);
+    return data;
+  },
+
+  /** Bulk update grades for enrolled subjects. */
+  bulkUpdateGrades: async (studentId, payload) => {
+    const { data } = await apiClient.put(`/staff/students/${studentId}/grades/bulk-update`, payload);
+    return data;
+  },
 };

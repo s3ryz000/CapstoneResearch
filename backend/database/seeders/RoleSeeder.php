@@ -17,16 +17,16 @@ class RoleSeeder extends Seeder
         //
         // create roles
         echo "Creating roles...\n";
-        Role::create(['name' => 'admin', 'guard_name' => 'api']);
-        Role::create(['name' => 'staff', 'guard_name' => 'api']);
-        Role::create(['name' => 'student', 'guard_name' => 'api']);
+        Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'api']);
+        Role::firstOrCreate(['name' => 'staff', 'guard_name' => 'api']);
+        Role::firstOrCreate(['name' => 'student', 'guard_name' => 'api']);
         echo "Roles created successfully\n";
 
         // create permissions
         echo "Creating permissions...\n";
-        Permission::create(['name' => 'create-user']);
-        Permission::create(['name' => 'edit-user']);
-        Permission::create(['name' => 'delete-user']);
+        Permission::firstOrCreate(['name' => 'create-user']);
+        Permission::firstOrCreate(['name' => 'edit-user']);
+        Permission::firstOrCreate(['name' => 'delete-user']);
         echo "Permissions created successfully\n";
     }
 }

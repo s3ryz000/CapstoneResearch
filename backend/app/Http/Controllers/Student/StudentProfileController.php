@@ -49,6 +49,9 @@ class StudentProfileController extends Controller
         
         $programMapping = ProgramMapping::where('student_id',$student->student_id)->where('academic_year', $academicYear)->where('semester', $semesterMapping[$semester])->first();
        
+        $service = app(\App\Services\AcademicStandingService::class);
+        $summary = $service->getAcademicSummary($student);
+
         return response()->json([
             'student' => $student,
             'academic_year' => $academicYear,
@@ -56,6 +59,7 @@ class StudentProfileController extends Controller
             'program_mapping' => $programMapping,
             'semester' => $semester,
             'institution_name' => SystemSetting::getValue('institution_name') ?: 'Trece Martires City College',
+            'academic_summary' => $summary,
         ]);
        } catch (\Exception $e) {
         return response()->json([
@@ -258,5 +262,29 @@ class StudentProfileController extends Controller
             'message' => 'SIS updated successfully.',
             'student' => $student->load('program'),
         ]);
+    }
+
+    /**
+     * GET /api/student/academic-summary
+     * Returns the authenticated student's academic summary.
+     */
+    public function academicSummary(Request $request): JsonResponse
+    {
+        if ($err = $this->requireAuth()) {
+            return $err;
+        }
+        if ($err = $this->requireRoles($request->user(), ['student'])) {
+            return $err;
+        }
+
+        $student = $request->user()->student;
+        if (! $student) {
+            return response()->json(['message' => 'Student record not found.'], 404);
+        }
+
+        $service = app(\App\Services\AcademicStandingService::class);
+        $summary = $service->getAcademicSummary($student);
+
+        return response()->json($summary);
     }
 }

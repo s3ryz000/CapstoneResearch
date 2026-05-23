@@ -19,6 +19,10 @@ class EnrollmentAuditLog extends Model
         'action',
         'reason',
         'had_grade',
+        'old_value',
+        'new_value',
+        'supporting_document_reference',
+        'user_role',
     ];
 
     protected $casts = [

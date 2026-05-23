@@ -127,6 +127,18 @@ const StudentLayout = () => {
                   <li>{institutionName} {}</li>
                   {programName && <li>{programName}</li>}
                   <li className="sd-status-enrolled !text-green-900">ENROLLED </li>
+                  {profile?.academic_summary && (
+                    <>
+                      <li className="font-semibold text-emerald-800">
+                        Overall GWA: {profile.academic_summary.overall_gwa != null ? profile.academic_summary.overall_gwa.toFixed(2) : '—'} (Computed)
+                      </li>
+                      {profile.academic_summary.latin_honors?.honor && (
+                        <li className="font-semibold text-amber-800">
+                          Standing: {profile.academic_summary.latin_honors.honor}
+                        </li>
+                      )}
+                    </>
+                  )}
                 </ul>
               </div>
             </div>

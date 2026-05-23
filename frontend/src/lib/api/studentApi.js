@@ -10,6 +10,11 @@ export const studentApi = {
     return data;
   },
 
+  getAcademicSummary: async () => {
+    const { data } = await apiClient.get('/student/academic-summary');
+    return data;
+  },
+
   /** Update authenticated student's SIS/SIUF fields (own record only). */
   updateSIS: async (payload) => {
     const { data } = await apiClient.put('/student/sis', payload);

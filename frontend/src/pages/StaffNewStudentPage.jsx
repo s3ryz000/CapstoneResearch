@@ -19,7 +19,7 @@ const defaultForm = {
   address: "",
   enrollment_date: new Date().toISOString().slice(0, 10),
   graduation_date: "",
-  GPA: "",
+
   program_id: "",
   subject_ids: [],
   record_type: "",
@@ -29,7 +29,7 @@ const defaultForm = {
   document_status: "",
 };
 
-const TOTAL_PHASES = 5;
+const TOTAL_PHASES = 4;
 
 const StaffNewStudentPage = ({ basePath = "/staff" }) => {
   const navigate = useNavigate();
@@ -98,16 +98,9 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
       if (!form.program_id) err.program_id = "Program is required.";
       if (!form.enrollment_date)
         err.enrollment_date = "Enrollment date is required.";
-      if (
-        form.GPA !== "" &&
-        (isNaN(parseFloat(form.GPA)) ||
-          parseFloat(form.GPA) < 0 ||
-          parseFloat(form.GPA) > 5)
-      ) {
-        err.GPA = "GPA must be between 0 and 5.00.";
-      }
+
     }
-    if (phase === 5) {
+    if (phase === 4) {
       if (!form.record_type?.trim()) err.record_type = "Record type is required.";
       if (!form.cabinet_no?.trim()) err.cabinet_no = "Cabinet no. is required.";
       if (!form.shelf_no?.trim()) err.shelf_no = "Shelf no. is required.";
@@ -132,14 +125,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
     if (!form.program_id) err.program_id = "Program is required.";
     if (!form.enrollment_date)
       err.enrollment_date = "Enrollment date is required.";
-    if (
-      form.GPA !== "" &&
-      (isNaN(parseFloat(form.GPA)) ||
-        parseFloat(form.GPA) < 0 ||
-        parseFloat(form.GPA) > 5)
-    ) {
-      err.GPA = "GPA must be between 0 and 5.00.";
-    }
+
     if (!form.record_type?.trim()) err.record_type = "Record type is required.";
     if (!form.cabinet_no?.trim()) err.cabinet_no = "Cabinet no. is required.";
     if (!form.shelf_no?.trim()) err.shelf_no = "Shelf no. is required.";
@@ -177,7 +163,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
         address: form.address?.trim() || null,
         enrollment_date: form.enrollment_date,
         graduation_date: form.graduation_date || null,
-        GPA: form.GPA !== "" ? parseFloat(form.GPA) : null,
+
         sex: form.sex,
         program_id: form.program_id,
         subject_ids: form.subject_ids,
@@ -215,15 +201,13 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
         // Jump to the first step that has an error
         const phase1Fields = ["student_number", "first_name", "last_name", "date_of_birth"];
         const phase2Fields = ["email", "contact_number", "address"];
-        const phase3Fields = ["program_id", "enrollment_date", "graduation_date", "GPA"];
-        const phase4Fields = ["subject_ids"];
-        const phase5Fields = ["record_type", "cabinet_no", "shelf_no", "folder_code", "document_status"];
+        const phase3Fields = ["program_id", "enrollment_date", "graduation_date"];
+        const phase4Fields = ["record_type", "cabinet_no", "shelf_no", "folder_code", "document_status"];
         const errorKeys = Object.keys(errMap);
         if (errorKeys.some((k) => phase1Fields.includes(k))) setCurrentPhase(1);
         else if (errorKeys.some((k) => phase2Fields.includes(k))) setCurrentPhase(2);
         else if (errorKeys.some((k) => phase3Fields.includes(k))) setCurrentPhase(3);
         else if (errorKeys.some((k) => phase4Fields.includes(k))) setCurrentPhase(4);
-        else if (errorKeys.some((k) => phase5Fields.includes(k))) setCurrentPhase(5);
         const allMessages = Object.values(errMap).join(" · ");
         staffToast.error("Student not created", allMessages || parsed.message || "Please fix the highlighted fields.");
       } else {
@@ -297,14 +281,13 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
             className="flex items-center justify-center gap-0 py-4 mb-6 bg-gray-50 rounded-lg"
             aria-label="Form phases"
           >
-            {[1, 2, 3, 4, 5].map((step) => (
+            {[1, 2, 3, 4].map((step) => (
               <div key={step} className="flex items-center gap-2">
                 <span
-                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${
-                    currentPhase === step || currentPhase > step
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${currentPhase === step || currentPhase > step
                       ? "bg-tmcc text-white"
                       : "bg-gray-200 text-gray-600"
-                  }`}
+                    }`}
                 >
                   {step}
                 </span>
@@ -313,7 +296,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
                 >
                   Step {step}
                 </span>
-                {step < 5 && (
+                {step < 4 && (
                   <span
                     className={`w-8 h-0.5 mx-1 ${currentPhase > step ? "bg-tmcc" : "bg-gray-200"}`}
                   />
@@ -477,7 +460,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
                       type="email"
                       value={form.email}
                       onChange={handleChange}
-                      placeholder="student@tmcc.edu.ph"
+                      placeholder="[EMAIL_ADDRESS]"
                       maxLength={100}
                       className={`${inputBase} ${errors.email ? inputError : inputNormal}`}
                       aria-invalid={!!errors.email}
@@ -612,30 +595,6 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
                       className={`${inputBase} ${inputNormal}`}
                     />
                   </div>
-                  <div className="flex flex-col gap-1.5 max-w-[120px]">
-                    <label
-                      htmlFor="GPA"
-                      className="text-sm font-medium text-gray-600"
-                    >
-                      GPA
-                    </label>
-                    <input
-                      id="GPA"
-                      name="GPA"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="5"
-                      value={form.GPA}
-                      onChange={handleChange}
-                      placeholder="0.00–5.00"
-                      className={`${inputBase} ${errors.GPA ? inputError : inputNormal}`}
-                      aria-invalid={!!errors.GPA}
-                    />
-                    {errors.GPA && (
-                      <span className="text-xs text-red-600">{errors.GPA}</span>
-                    )}
-                  </div>
                 </div>
               </div>
             )}
@@ -645,66 +604,6 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
                 <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
                   <span className="inline-flex items-center justify-center min-w-[4.5rem] py-1.5 px-3 bg-tmcc text-white text-sm font-bold rounded-md tracking-wide">
                     Step 4
-                  </span>
-                  Curriculum Subjects
-                </h4>
-
-                {form.program_id ? (
-                  <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
-                    <h5 className="m-0 mb-3 text-sm font-semibold text-gray-800">
-                      Required Subjects (1st Year, 1st Semester)
-                    </h5>
-                    <p className="text-sm text-gray-600 mb-4 mt-0">
-                      These subjects are locked based on the program selected in Phase 3.
-                    </p>
-                    {loadingCurriculum ? (
-                      <p className="text-sm text-gray-500 m-0">Loading subjects...</p>
-                    ) : curriculumData?.curriculum?.length > 0 ? (
-                      <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto pr-2">
-                        {curriculumData.curriculum
-                          .filter((c) => c.year_level === 1 && c.semester === 1)
-                          .map((c) => (
-                            <label
-                              key={c.id}
-                              className="flex items-start gap-3 p-3 bg-white border border-gray-200 rounded opacity-80 cursor-not-allowed"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={true}
-                                readOnly
-                                disabled
-                                className="mt-1"
-                              />
-                              <div className="flex-1">
-                                <p className="m-0 text-sm font-medium text-gray-800">
-                                  {c.subject?.code} - {c.subject?.title}
-                                </p>
-                                <p className="m-0 text-xs text-gray-500 mt-0.5">
-                                  {c.subject?.units} Units
-                                </p>
-                              </div>
-                            </label>
-                          ))}
-                        {curriculumData.curriculum.filter((c) => c.year_level === 1 && c.semester === 1).length === 0 && (
-                           <p className="text-sm text-gray-500 m-0">No subjects found for 1st Year, 1st Semester.</p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 m-0">No subjects found in curriculum.</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 m-0">Please select a program in Phase 3 first.</p>
-                )}
-              </div>
-            )}
-
-
-            {currentPhase === 5 && (
-              <div className="mb-8 p-6 bg-white rounded-xl border-l-4 border-tmcc shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
-                <h4 className="flex items-center gap-3 m-0 mb-5 pb-3 text-base font-semibold text-gray-800 border-b-2 border-gray-200">
-                  <span className="inline-flex items-center justify-center min-w-[4.5rem] py-1.5 px-3 bg-tmcc text-white text-sm font-bold rounded-md tracking-wide">
-                    Step 5
                   </span>
                   Archive Record
                 </h4>

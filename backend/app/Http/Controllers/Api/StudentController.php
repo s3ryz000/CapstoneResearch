@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateStudentRequest;
 use App\Models\ArchiveRecord;
 use App\Models\Curriculum;
 use App\Services\OfficialTranscriptExportService;
+use App\Services\AcademicProgressionService;
 use App\Models\Enrollment;
 use App\Models\EnrollmentAuditLog;
 use App\Models\Grade;
@@ -104,7 +105,7 @@ class StudentController extends Controller
         }
 
         $validated = $request->validated();
-        $validated['GPA'] = isset($validated['GPA']) ? round((float) $validated['GPA'], 2) : null;
+
 
         $subjectIds = $validated['subject_ids'] ?? [];
         unset($validated['subject_ids']);
@@ -259,7 +260,7 @@ class StudentController extends Controller
         }
 
         $validated = $request->validated();
-        $validated['GPA'] = isset($validated['GPA']) ? round((float) $validated['GPA'], 2) : null;
+
 
         $studentNumber = $validated['student_number'];
         $name = trim($validated['first_name'] . ' ' . $validated['last_name']);
@@ -268,7 +269,7 @@ class StudentController extends Controller
         $trackFields = [
             'student_number', 'first_name', 'last_name', 'middle_name',
             'date_of_birth', 'sex', 'email', 'contact_number', 'address',
-            'enrollment_date', 'graduation_date', 'GPA',
+            'enrollment_date', 'graduation_date',
         ];
         $oldValues = [];
         foreach ($trackFields as $field) {
@@ -529,10 +530,14 @@ class StudentController extends Controller
         // For every subject being enrolled, if the curriculum entry declares a
         // prerequisite the student must already have a passing grade in it.
         // No same-batch bypass: enrolling prereq + dependent together is blocked.
-        $prereqEntries = Curriculum::where('program_id', $programId)
+        $prereqEntries = Curriculum::with(['subject', 'prerequisites'])
+            ->where('program_id', $programId)
             ->whereIn('subject_id', $subjectsToEnroll)
-            ->whereNotNull('prerequisite')
-            ->get(['subject_id', 'prerequisite']);
+            ->get();
+
+        $prereqEntries = $prereqEntries->filter(function ($entry) {
+            return $entry->prerequisites->isNotEmpty();
+        });
 
         if ($prereqEntries->isNotEmpty()) {
             $passedSubjectIds = Grade::where('student_id', $studentId)
@@ -549,19 +554,21 @@ class StudentController extends Controller
                 ->pluck('subject_id')
                 ->toArray();
 
-            $allIds = $prereqEntries->pluck('prerequisite')
-                ->merge($prereqEntries->pluck('subject_id'))
-                ->unique()->toArray();
-            $subjectIndex = Subject::whereIn('id', $allIds)
-                ->get(['id', 'code'])->keyBy('id');
-
             $prereqErrors = [];
             foreach ($prereqEntries as $entry) {
-                $prereqId = $entry->prerequisite;
-                if (! in_array($prereqId, $passedSubjectIds)) {
-                    $prereqCode   = $subjectIndex->get($prereqId)?->code   ?? "Subject #{$prereqId}";
-                    $currentCode  = $subjectIndex->get($entry->subject_id)?->code ?? "Subject #{$entry->subject_id}";
-                    $prereqErrors[] = "{$prereqCode} must be completed before enrolling in {$currentCode}.";
+                $requiredPrereqIds = $entry->prerequisites->pluck('id')->toArray();
+                $missingIds = array_diff($requiredPrereqIds, $passedSubjectIds);
+
+                if (!empty($missingIds)) {
+                    $missingCodes = [];
+                    foreach ($entry->prerequisites as $prereqSubject) {
+                        if (in_array($prereqSubject->id, $missingIds)) {
+                            $missingCodes[] = $prereqSubject->code;
+                        }
+                    }
+                    $missingDisplay = implode(', ', $missingCodes);
+                    $currentCode = $entry->subject?->code ?? "Subject #{$entry->subject_id}";
+                    $prereqErrors[] = "{$missingDisplay} must be completed before enrolling in {$currentCode}.";
                 }
             }
 
@@ -584,12 +591,23 @@ class StudentController extends Controller
             $statusVal, $yearLevel, &$duplicateSubjects, &$enrolledCount
         ) {
             foreach ($subjectsToEnroll as $subjectId) {
-                // Only count non-deleted active enrollments as duplicates
+                // Must not be already passed/credited
+                if (in_array($subjectId, $passedSubjectIds)) {
+                    $duplicateSubjects[] = $subjectId;
+                    continue;
+                }
+
+                // Check for active enrollment in ANY term, not just the selected one
                 $activeExists = Enrollment::where('student_id', $studentId)
                     ->where('subject_id', $subjectId)
-                    ->where('academic_year', $academicYear)
-                    ->where('semester', $semesterInt)
-                    ->whereNotIn('status', ['archived', 'dropped'])
+                    ->whereNotIn('status', [
+                        'archived', 'Archived', 
+                        'cancelled', 'Cancelled', 
+                        'failed', 'Failed', 
+                        'withdrawn', 'Withdrawn', 
+                        'fda', 'FDA',
+                        'dropped', 'Dropped'
+                    ])
                     ->whereNull('deleted_at')
                     ->exists();
 
@@ -709,37 +727,60 @@ class StudentController extends Controller
             return response()->json(['message' => 'Enrollment not found or already removed.'], 404);
         }
 
-        $user      = $request->user();
-        $confirmed = filter_var($request->input('confirmed', false), FILTER_VALIDATE_BOOLEAN);
-        $reason    = $request->input('reason', null);
+        $user   = $request->user();
+        $reason = $request->input('reason', null);
 
-        // Check if this enrollment has a grade
+        // Check if this enrollment has a grade with final status
         $grade = Grade::where('student_id', $id)
             ->where('subject_id', $enrollment->subject_id)
             ->where('academic_year', $enrollment->academic_year)
             ->where('semester', $enrollment->semester)
             ->first();
 
-        $hasGrade = !is_null($grade);
-
-        // If grade exists and not yet confirmed by frontend, return a warning
-        if ($hasGrade && !$confirmed) {
-            return response()->json([
-                'message'   => 'This subject already has a recorded grade. Removing it will archive the enrollment but preserve the grade for historical records. Continue?',
-                'has_grade' => true,
-                'requires_confirmation' => true,
-                'grade_value' => $grade->grade_value,
-            ], 409); // 409 Conflict = requires user decision
+        $hasFinalStatus = false;
+        if ($grade) {
+            $finalStatuses = ['Passed', 'Failed', 'INC', 'Withdrawn', 'FDA', 'Credited'];
+            if ($grade->status && in_array($grade->status, $finalStatuses)) {
+                $hasFinalStatus = true;
+            } elseif ($grade->grade_value !== null && $grade->grade_value > 0) {
+                $hasFinalStatus = true;
+            } elseif ($grade->remarks && in_array(strtoupper($grade->remarks), ['PASSED', 'FAILED', 'INC', 'WITHDRAWN', 'FDA', 'CREDITED'])) {
+                $hasFinalStatus = true;
+            }
         }
 
-        $oldStatus = $enrollment->status;
+        // Block deletion if enrollment has a grade with final status
+        if ($hasFinalStatus) {
+            return response()->json([
+                'message' => 'This enrollment already has a grade or final status. Use correction workflow instead of deleting finalized academic history.',
+                'has_final_status' => true,
+                'grade_value' => $grade?->grade_value,
+                'grade_status' => $grade?->status ?? $grade?->remarks,
+            ], 422);
+        }
 
-        DB::transaction(function () use ($enrollment, $user, $reason, $hasGrade) {
-            // Soft-delete the enrollment (sets deleted_at)
+        // No final grade — allow cancellation
+        if (!$reason) {
+            return response()->json([
+                'message' => 'A reason is required to cancel an enrollment.',
+                'requires_reason' => true,
+            ], 422);
+        }
+
+        DB::transaction(function () use ($enrollment, $user, $reason, $grade) {
+            $oldStatus = $enrollment->status;
+
+            // Update status to Cancelled and soft-delete
+            $enrollment->status = 'Cancelled';
             $enrollment->deleted_by   = $user->id;
             $enrollment->delete_reason = $reason;
             $enrollment->save();
-            $enrollment->delete(); // triggers SoftDelete (sets deleted_at)
+            $enrollment->delete(); // triggers SoftDelete
+
+            // Also remove the placeholder grade if it exists and has no value
+            if ($grade && $grade->grade_value === null && (!$grade->status || $grade->status === 'Enrolled')) {
+                $grade->delete();
+            }
 
             // Write audit log
             EnrollmentAuditLog::create([
@@ -748,24 +789,24 @@ class StudentController extends Controller
                 'subject_id'    => $enrollment->subject_id,
                 'academic_year' => $enrollment->academic_year,
                 'semester'      => $enrollment->semester,
-                'old_status'    => $enrollment->status,
-                'new_status'    => 'archived',
+                'old_status'    => $oldStatus,
+                'new_status'    => 'Cancelled',
                 'changed_by'    => $user->id,
-                'action'        => 'archived',
+                'action'        => 'cancelled',
                 'reason'        => $reason,
-                'had_grade'     => $hasGrade,
+                'had_grade'     => !is_null($grade),
+                'user_role'     => $user->roles->first()?->name ?? $user->role ?? null,
             ]);
 
-            // --- Clean up ProgramMapping if this was the last active subject in the semester group ---
+            // Clean up ProgramMapping if last active subject in semester group
             $remainingActive = Enrollment::where('student_id', $enrollment->student_id)
                 ->where('academic_year', $enrollment->academic_year)
                 ->where('semester', $enrollment->semester)
-                ->whereNull('deleted_at')  // exclude soft-deleted
-                ->whereNotIn('status', ['archived', 'dropped'])
+                ->whereNull('deleted_at')
+                ->whereNotIn('status', ['archived', 'Cancelled'])
                 ->count();
 
             if ($remainingActive === 0) {
-                // Archive the ProgramMapping so it doesn't block future enrollments
                 ProgramMapping::where('student_id', $enrollment->student_id)
                     ->where('academic_year', $enrollment->academic_year)
                     ->where('semester', $enrollment->semester)
@@ -774,15 +815,14 @@ class StudentController extends Controller
         });
 
         SystemLog::create([
-            'action'  => 'Enrollment removed',
+            'action'  => 'Enrollment cancelled',
             'user_id' => $user->id,
             'role'    => $user->roles->first()?->name ?? $user->role ?? null,
         ]);
 
         return response()->json([
-            'message'   => 'Subject enrollment removed successfully.',
-            'has_grade' => $hasGrade,
-            'archived'  => true,
+            'message'  => 'Enrollment cancelled successfully.',
+            'archived' => true,
         ]);
     }
 
@@ -826,6 +866,14 @@ class StudentController extends Controller
         }
         $grade = Grade::create($validated);
         $grade->load('subject');
+        
+        // Recalculate GWA
+        $student = Student::find($id);
+        if ($student) {
+            $standingService = app(\App\Services\AcademicStandingService::class);
+            $standingService->recomputeAndCacheOverallGwa($student);
+        }
+
         SystemLog::create([
             'action' => 'Grade added',
             'user_id' => $request->user()->id,
@@ -860,6 +908,14 @@ class StudentController extends Controller
         }
         $grade->update($validated);
         $grade->load('subject');
+        
+        // Recalculate GWA
+        $student = Student::find($id);
+        if ($student) {
+            $standingService = app(\App\Services\AcademicStandingService::class);
+            $standingService->recomputeAndCacheOverallGwa($student);
+        }
+
         SystemLog::create([
             'action' => 'Grade updated',
             'user_id' => $request->user()->id,
@@ -884,6 +940,14 @@ class StudentController extends Controller
             return response()->json(['message' => 'Grade not found.'], 404);
         }
         $grade->delete();
+
+        // Recalculate GWA
+        $student = Student::find($id);
+        if ($student) {
+            $standingService = app(\App\Services\AcademicStandingService::class);
+            $standingService->recomputeAndCacheOverallGwa($student);
+        }
+
         SystemLog::create([
             'action' => 'Grade removed',
             'user_id' => $request->user()->id,
@@ -929,5 +993,402 @@ class StudentController extends Controller
             Log::error('Failed to archive student: ' . $e->getMessage());
             return response()->json(['message' => 'Failed to archive student.'], 500);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Academic Progression Endpoints
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * GET /api/staff/students/{id}/academic-progress
+     * Returns full academic progression state for a student.
+     */
+    public function academicProgress(int $id): JsonResponse
+    {
+        if ($err = $this->requireAuth()) {
+            return $err;
+        }
+        if ($err = $this->requireRoles(request()->user(), ['staff', 'admin'])) {
+            return $err;
+        }
+
+        $student = Student::with('program')->find($id);
+        if (! $student) {
+            return response()->json(['message' => 'Student not found.'], 404);
+        }
+
+        $service = app(AcademicProgressionService::class);
+        $progress = $service->getAcademicProgress($student);
+
+        return response()->json($progress);
+    }
+
+    /**
+     * GET /api/staff/students/{id}/academic-summary
+     * Returns full academic summary including GWA, GPAs, and Honors eligibility.
+     */
+    public function academicSummary(int $id): JsonResponse
+    {
+        if ($err = $this->requireAuth()) {
+            return $err;
+        }
+        if ($err = $this->requireRoles(request()->user(), ['staff', 'admin'])) {
+            return $err;
+        }
+
+        $student = Student::find($id);
+        if (! $student) {
+            return response()->json(['message' => 'Student not found.'], 404);
+        }
+
+        $service = app(\App\Services\AcademicStandingService::class);
+        $summary = $service->getAcademicSummary($student);
+
+        return response()->json($summary);
+    }
+
+    /**
+     * POST /api/staff/students/{id}/enrollments/add-next-term
+     * Add enrollment for the next allowed term. Backend computes everything.
+     */
+    public function addNextTerm(Request $request, int $id): JsonResponse
+    {
+        if ($err = $this->requireAuth()) {
+            return $err;
+        }
+        if ($err = $this->requireRoles($request->user(), ['staff', 'admin'])) {
+            return $err;
+        }
+
+        $student = Student::find($id);
+        if (! $student) {
+            return response()->json(['message' => 'Student not found.'], 404);
+        }
+
+        if (! $student->program_id) {
+            return response()->json(['message' => 'Student has no active program. Set a program first.'], 422);
+        }
+
+        $validated = $request->validate([
+            // Regular next-term subjects (optional if only retaking)
+            'subject_ids'     => ['nullable', 'array'],
+            'subject_ids.*'   => ['integer', 'exists:subjects,id'],
+            // Retake subjects (previously Failed/Withdrawn/FDA)
+            'retake_subject_ids'   => ['nullable', 'array'],
+            'retake_subject_ids.*' => ['integer', 'exists:subjects,id'],
+        ]);
+
+        $subjectIds      = $validated['subject_ids'] ?? [];
+        $retakeSubjectIds = $validated['retake_subject_ids'] ?? [];
+
+        // At least one subject must be selected (regular or retake)
+        if (empty($subjectIds) && empty($retakeSubjectIds)) {
+            return response()->json([
+                'message' => 'Enrollment validation failed.',
+                'errors'  => ['validation' => ['Select at least one regular or retake subject to enroll.']],
+            ], 422);
+        }
+
+        $service = app(AcademicProgressionService::class);
+        $result  = $service->validateAddNextTerm($student, $subjectIds, $retakeSubjectIds);
+
+        if (!$result['valid']) {
+            return response()->json([
+                'message' => 'Enrollment validation failed.',
+                'errors'  => ['validation' => $result['errors']],
+            ], 422);
+        }
+
+        $data          = $result['data'];
+        $user          = $request->user();
+        $role          = $user->roles->first()?->name ?? $user->role ?? null;
+        $enrolledCount = 0;
+        $retakeCount   = 0;
+
+        DB::transaction(function () use ($student, $data, $user, $role, &$enrolledCount, &$retakeCount) {
+
+            // ── Regular subjects ──────────────────────────────────────────────
+            foreach ($data['subject_ids'] as $subjectId) {
+                $enrollment = Enrollment::create([
+                    'student_id'    => $student->student_id,
+                    'subject_id'    => $subjectId,
+                    'academic_year' => $data['academic_year'],
+                    'semester'      => $data['semester'],
+                    'year_level'    => $data['year_level'],
+                    'status'        => 'Enrolled',
+                    'is_retake'     => false,
+                ]);
+
+                Grade::create([
+                    'student_id'    => $student->student_id,
+                    'subject_id'    => $subjectId,
+                    'academic_year' => $data['academic_year'],
+                    'semester'      => $data['semester'],
+                    'enrollment_id' => $enrollment->id,
+                    'status'        => 'Enrolled',
+                    'grade_value'   => null,
+                    'remarks'       => null,
+                ]);
+
+                EnrollmentAuditLog::create([
+                    'student_id'    => $student->student_id,
+                    'enrollment_id' => $enrollment->id,
+                    'subject_id'    => $subjectId,
+                    'academic_year' => $data['academic_year'],
+                    'semester'      => $data['semester'],
+                    'old_status'    => null,
+                    'new_status'    => 'Enrolled',
+                    'changed_by'    => $user->id,
+                    'action'        => 'enrollment_created',
+                    'reason'        => null,
+                    'had_grade'     => false,
+                    'user_role'     => $role,
+                ]);
+
+                $enrolledCount++;
+            }
+
+            // ── Retake subjects ───────────────────────────────────────────────
+            foreach ($data['retake_ids'] as $subjectId) {
+                $enrollment = Enrollment::create([
+                    'student_id'    => $student->student_id,
+                    'subject_id'    => $subjectId,
+                    'academic_year' => $data['academic_year'],
+                    'semester'      => $data['semester'],
+                    'year_level'    => $data['year_level'],
+                    'status'        => 'Enrolled',
+                    'is_retake'     => true,
+                ]);
+
+                Grade::create([
+                    'student_id'    => $student->student_id,
+                    'subject_id'    => $subjectId,
+                    'academic_year' => $data['academic_year'],
+                    'semester'      => $data['semester'],
+                    'enrollment_id' => $enrollment->id,
+                    'status'        => 'Enrolled',
+                    'grade_value'   => null,
+                    'remarks'       => null,
+                ]);
+
+                EnrollmentAuditLog::create([
+                    'student_id'    => $student->student_id,
+                    'enrollment_id' => $enrollment->id,
+                    'subject_id'    => $subjectId,
+                    'academic_year' => $data['academic_year'],
+                    'semester'      => $data['semester'],
+                    'old_status'    => null,
+                    'new_status'    => 'Enrolled',
+                    'changed_by'    => $user->id,
+                    'action'        => 'retake_enrollment_created',
+                    'reason'        => 'Retake of previously Failed/Withdrawn/FDA attempt.',
+                    'had_grade'     => false,
+                    'user_role'     => $role,
+                ]);
+
+                $retakeCount++;
+            }
+
+            // ── Upsert ProgramMapping ─────────────────────────────────────────
+            ProgramMapping::updateOrCreate(
+                [
+                    'student_id'    => $student->student_id,
+                    'program_id'    => $student->program_id,
+                    'academic_year' => $data['academic_year'],
+                    'semester'      => $data['semester'],
+                ],
+                [
+                    'status'     => 'enrolled',
+                    'year_level' => $data['year_level'],
+                ]
+            );
+        });
+
+        $total = $enrolledCount + $retakeCount;
+        SystemLog::create([
+            'action'  => "Added {$enrolledCount} enrollment(s) and {$retakeCount} retake(s) for Year {$data['year_level']} Sem {$data['semester']} A.Y. {$data['academic_year']}",
+            'user_id' => $user->id,
+            'role'    => $role,
+        ]);
+
+        $student->refresh();
+        $progress = $service->getAcademicProgress($student);
+
+        return response()->json([
+            'message'        => "{$total} subject(s) enrolled successfully for Year {$data['year_level']}, Semester {$data['semester']}, A.Y. {$data['academic_year']} ({$enrolledCount} new, {$retakeCount} retake).",
+            'enrolled_count' => $enrolledCount,
+            'retake_count'   => $retakeCount,
+            'progress'       => $progress,
+        ], 201);
+    }
+
+
+    /**
+     * PUT /api/staff/students/{id}/grades/bulk-update
+     * Bulk update grades for enrolled subjects.
+     */
+    public function bulkUpdateGrades(Request $request, int $id): JsonResponse
+    {
+        if ($err = $this->requireAuth()) {
+            return $err;
+        }
+        if ($err = $this->requireRoles($request->user(), ['staff', 'admin'])) {
+            return $err;
+        }
+
+        $student = Student::find($id);
+        if (! $student) {
+            return response()->json(['message' => 'Student not found.'], 404);
+        }
+
+        $validated = $request->validate([
+            'grades'                                => ['required', 'array', 'min:1'],
+            'grades.*.grade_id'                     => ['required', 'integer', 'exists:grades,id'],
+            'grades.*.grade_value'                  => ['nullable', 'numeric', 'min:0', 'max:5.00'],
+            'grades.*.status'                       => ['nullable', 'string', 'in:Enrolled,Passed,Failed,INC,Withdrawn,FDA,Credited,DRP,CON'],
+            'grades.*.remarks'                      => ['nullable', 'string', 'max:50'],
+            'grades.*.supporting_document_reference' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $user = $request->user();
+        $role = $user->roles->first()?->name ?? $user->role ?? null;
+        $service = app(AcademicProgressionService::class);
+        $errors = [];
+        $updatedCount = 0;
+
+        DB::transaction(function () use ($validated, $student, $user, $role, $service, &$errors, &$updatedCount) {
+            foreach ($validated['grades'] as $index => $gradeData) {
+                $grade = Grade::where('id', $gradeData['grade_id'])
+                    ->where('student_id', $student->student_id)
+                    ->first();
+
+                if (!$grade) {
+                    $errors[] = "Grade #{$gradeData['grade_id']} not found for this student.";
+                    continue;
+                }
+
+                $gradeValue = isset($gradeData['grade_value']) && $gradeData['grade_value'] !== null && $gradeData['grade_value'] !== ''
+                    ? round((float) $gradeData['grade_value'], 2)
+                    : null;
+
+                $explicitStatus = $gradeData['status'] ?? null;
+
+                // Auto-determine status from grade value if not explicitly set
+                $newStatus = $service->autoStatusFromGrade($gradeValue, $explicitStatus);
+
+                // Auto-generate remarks
+                $remarks = !empty($gradeData['remarks'])
+                    ? $gradeData['remarks']
+                    : $service->autoGenerateRemarks($gradeValue, $newStatus);
+
+                // Validate: Credited requires supporting document
+                if ($newStatus === 'Credited' && empty($gradeData['supporting_document_reference'])) {
+                    $errors[] = "Grade #{$gradeData['grade_id']}: Credited status requires a supporting document reference.";
+                    continue;
+                }
+
+                // Track old values for audit
+                $oldValue = json_encode([
+                    'grade_value' => $grade->grade_value,
+                    'status'      => $grade->status,
+                    'remarks'     => $grade->remarks,
+                ]);
+
+                // Handle INC → Passed conversion
+                $convertedFrom = null;
+                $convertedAt = null;
+                if ($grade->status === 'INC' && $newStatus === 'Passed') {
+                    $convertedFrom = 'INC';
+                    $convertedAt = now();
+                }
+
+                // Update the grade
+                $grade->update([
+                    'grade_value'                  => $gradeValue,
+                    'status'                       => $newStatus,
+                    'remarks'                      => $remarks,
+                    'supporting_document_reference' => $gradeData['supporting_document_reference'] ?? $grade->supporting_document_reference,
+                    'converted_from_status'        => $convertedFrom ?? $grade->converted_from_status,
+                    'converted_at'                 => $convertedAt ?? $grade->converted_at,
+                ]);
+
+                // Update enrollment status to match
+                if ($grade->enrollment_id) {
+                    Enrollment::where('id', $grade->enrollment_id)->update(['status' => $newStatus]);
+                } else {
+                    // Link by matching fields
+                    Enrollment::where('student_id', $student->student_id)
+                        ->where('subject_id', $grade->subject_id)
+                        ->where('academic_year', $grade->academic_year)
+                        ->where('semester', $grade->semester)
+                        ->whereNull('deleted_at')
+                        ->update(['status' => $newStatus]);
+                }
+
+                // Audit log
+                $newValue = json_encode([
+                    'grade_value' => $gradeValue,
+                    'status'      => $newStatus,
+                    'remarks'     => $remarks,
+                ]);
+
+                $action = 'grade_updated';
+                if ($convertedFrom === 'INC') {
+                    $action = 'inc_to_passed';
+                } elseif ($newStatus === 'Credited') {
+                    $action = 'marked_credited';
+                }
+
+                EnrollmentAuditLog::create([
+                    'student_id'                    => $student->student_id,
+                    'enrollment_id'                 => $grade->enrollment_id ?? 0,
+                    'subject_id'                    => $grade->subject_id,
+                    'academic_year'                 => $grade->academic_year,
+                    'semester'                      => $grade->semester,
+                    'old_status'                    => $grade->getOriginal('status'),
+                    'new_status'                    => $newStatus,
+                    'changed_by'                    => $user->id,
+                    'action'                        => $action,
+                    'reason'                        => null,
+                    'had_grade'                     => true,
+                    'old_value'                     => $oldValue,
+                    'new_value'                     => $newValue,
+                    'supporting_document_reference' => $gradeData['supporting_document_reference'] ?? null,
+                    'user_role'                     => $role,
+                ]);
+
+                $updatedCount++;
+            }
+        });
+
+        if (!empty($errors) && $updatedCount === 0) {
+            return response()->json([
+                'message' => 'Grade update failed.',
+                'errors'  => ['validation' => $errors],
+            ], 422);
+        }
+
+        SystemLog::create([
+            'action'  => "Bulk updated {$updatedCount} grade(s) for student #{$student->student_id}",
+            'user_id' => $user->id,
+            'role'    => $role,
+        ]);
+
+        // Return updated progress
+        $student->refresh();
+        
+        // Recalculate GWA
+        $standingService = app(\App\Services\AcademicStandingService::class);
+        $standingService->recomputeAndCacheOverallGwa($student);
+
+        $service = app(AcademicProgressionService::class);
+        $progress = $service->getAcademicProgress($student);
+
+        return response()->json([
+            'message'       => "{$updatedCount} grade(s) updated successfully.",
+            'updated_count' => $updatedCount,
+            'errors'        => $errors,
+            'progress'      => $progress,
+        ]);
     }
 }

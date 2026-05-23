@@ -404,6 +404,12 @@ const ViewRecordsPage = () => {
                           <dt className="text-xs font-medium text-gray-500 uppercase w-40 shrink-0">Major</dt>
                           <dd className="m-0 text-sm text-gray-900">N/A</dd>
                         </div>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 px-4 py-3">
+                          <dt className="text-xs font-medium text-gray-500 uppercase w-40 shrink-0">Overall GWA (Computed)</dt>
+                          <dd className="m-0 text-sm text-gray-900 font-bold">
+                            {student.GPA != null ? Number(student.GPA).toFixed(2) : '—'}
+                          </dd>
+                        </div>
                       </dl>
                     </div>
 

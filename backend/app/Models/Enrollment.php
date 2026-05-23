@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Enrollment extends Model
@@ -15,9 +16,15 @@ class Enrollment extends Model
         'subject_id',
         'academic_year',
         'semester',
+        'year_level',
         'status',
+        'is_retake',
         'deleted_by',
         'delete_reason',
+    ];
+
+    protected $casts = [
+        'is_retake' => 'boolean',
     ];
 
     protected $dates = ['deleted_at'];
@@ -30,5 +37,13 @@ class Enrollment extends Model
     public function subject(): BelongsTo
     {
         return $this->belongsTo(Subject::class);
+    }
+
+    /**
+     * The grade record linked to this enrollment (same student, subject, term).
+     */
+    public function grade(): HasOne
+    {
+        return $this->hasOne(Grade::class, 'enrollment_id', 'id');
     }
 }

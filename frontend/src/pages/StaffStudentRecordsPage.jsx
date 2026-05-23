@@ -181,12 +181,6 @@ const StaffStudentRecordsPage = () => {
         <h2 className="m-0 text-2xl font-bold text-gray-800">
           Student Records
         </h2>
-        <Link
-          to="/staff/students/new"
-          className="inline-flex items-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium bg-tmcc text-white no-underline hover:bg-tmcc-dark shadow-sm"
-        >
-          <FiUserPlus /> New Student
-        </Link>
       </section>
       {loadError && (
         <div

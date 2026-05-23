@@ -38,7 +38,7 @@ class StoreStudentRequest extends FormRequest
             'previous_course' => ['nullable', 'string', 'max:150'],
             'enrollment_date' => ['required', 'date'],
             'graduation_date' => ['nullable', 'date', 'after_or_equal:enrollment_date'],
-            'GPA' => ['nullable', 'numeric', 'min:0', 'max:5.00'],
+
             'program_id' => ['required', 'exists:programs,id'],
             'subject_ids' => ['nullable', 'array'],
             'subject_ids.*' => ['exists:subjects,id'],

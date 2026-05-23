@@ -16,6 +16,7 @@ import {
   FiClipboard,
   FiEdit2,
   FiSearch,
+  FiUserPlus,
 } from 'react-icons/fi';
 import { useAuth } from '../contexts/AuthContext';
 import ChangePasswordModal from '../components/staff/ChangePasswordModal';
@@ -103,6 +104,13 @@ const StaffLayout = () => {
   ];
 
   const registrarSubItems = [
+    {
+      id: 'new-student',
+      label: 'New Student',
+      icon: FiUserPlus,
+      path: '/staff/students/new',
+      isActive: (p) => p === '/staff/students/new',
+    },
     {
       id: 'students',
       label: 'Student Records',
