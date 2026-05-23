@@ -293,7 +293,14 @@ class StudentController extends Controller
         $changed = [];
         foreach ($trackFields as $field) {
             $newVal = $validated[$field] ?? null;
-            if ((string) ($oldValues[$field] ?? '') !== (string) ($newVal ?? '')) {
+            $oldVal = $oldValues[$field] ?? '';
+            
+            // Format Carbon date objects to YYYY-MM-DD so they match the frontend payload
+            if ($oldVal instanceof \Carbon\Carbon || $oldVal instanceof \Illuminate\Support\Carbon) {
+                $oldVal = $oldVal->format('Y-m-d');
+            }
+
+            if ((string) $oldVal !== (string) ($newVal ?? '')) {
                 $changed[] = str_replace('_', ' ', $field);
             }
         }
@@ -1132,6 +1139,32 @@ class StudentController extends Controller
             ], 422);
         }
 
+        // ── Academic load validation ──────────────────────────────────────────
+        // Must run after subject/retake validation so we work with the clean
+        // validated ID lists, not the raw frontend input.
+        $allSelectedIds    = array_merge($result['data']['subject_ids'], $result['data']['retake_ids']);
+        $loadService       = app(\App\Services\AcademicLoadValidationService::class);
+        $validatedNextTerm = [
+            'can_add'       => true,
+            'year_level'    => $result['data']['year_level'],
+            'semester'      => (int) $result['data']['semester'],
+            'academic_year' => $result['data']['academic_year'],
+        ];
+        $maxEligible = $loadService->computeMaxEligibleUnits($student, $validatedNextTerm);
+        $loadCheck   = $loadService->validate($allSelectedIds, $maxEligible);
+
+        if (!$loadCheck['is_valid_load']) {
+            return response()->json([
+                'message'         => 'Enrollment failed: ' . $loadCheck['message'],
+                'errors'          => ['load' => [$loadCheck['message']]],
+                'load_validation' => $loadCheck,
+            ], 422);
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+        // Residency is enforced by validateAddNextTerm() above via
+        // computeNextAllowedTerm(). No separate residency call is needed here.
+
         $data          = $result['data'];
         $user          = $request->user();
         $role          = $user->roles->first()?->name ?? $user->role ?? null;
@@ -1238,8 +1271,12 @@ class StudentController extends Controller
         });
 
         $total = $enrolledCount + $retakeCount;
+        
+        $studentName = trim($student->first_name . ' ' . $student->last_name);
+        $studentIdent = $student->student_number ? "{$student->student_number} ({$studentName})" : $studentName;
+
         SystemLog::create([
-            'action'  => "Added {$enrolledCount} enrollment(s) and {$retakeCount} retake(s) for Year {$data['year_level']} Sem {$data['semester']} A.Y. {$data['academic_year']}",
+            'action'  => "Added {$enrolledCount} enrollment(s) and {$retakeCount} retake(s) for student {$studentIdent} - Year {$data['year_level']} Sem {$data['semester']} A.Y. {$data['academic_year']}",
             'user_id' => $user->id,
             'role'    => $role,
         ]);
@@ -1400,9 +1437,11 @@ class StudentController extends Controller
                 'errors'  => ['validation' => $errors],
             ], 422);
         }
+        $studentName = trim($student->first_name . ' ' . $student->last_name);
+        $studentIdent = $student->student_number ? "{$student->student_number} ({$studentName})" : $studentName;
 
         SystemLog::create([
-            'action'  => "Bulk updated {$updatedCount} grade(s) for student #{$student->student_id}",
+            'action'  => "Bulk updated {$updatedCount} grade(s) for student {$studentIdent}",
             'user_id' => $user->id,
             'role'    => $role,
         ]);

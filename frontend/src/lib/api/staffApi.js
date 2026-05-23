@@ -189,7 +189,7 @@ export const staffApi = {
 
   getAcademicSummary: async (studentId) => {
     const { data } = await apiClient.get(`/staff/students/${studentId}/academic-summary`);
-    return data;
+    return data.summary;
   },
 
   /** Add enrollment for the next allowed term. Backend computes term. */

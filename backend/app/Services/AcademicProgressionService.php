@@ -8,6 +8,7 @@ use App\Models\Grade;
 use App\Models\Student;
 use App\Models\Subject;
 use Carbon\Carbon;
+use App\Services\AcademicResidencyValidationService;
 
 class AcademicProgressionService
 {
@@ -124,28 +125,29 @@ class AcademicProgressionService
             ];
         }
 
-        // Get all active (non-soft-deleted, non-archived) enrollments with their grades
+        if (!$student->enrollment_date) {
+            return [
+                'year_level' => null,
+                'semester' => null,
+                'academic_year' => null,
+                'can_add' => false,
+                'blocking_reason' => 'Student has no enrollment date set. Please update the student profile before adding enrollments.',
+            ];
+        }
+
+        // Get all active (non-soft-deleted, non-archived, non-cancelled) enrollments.
+        // Excludes stray rows with lowercase 'enrolled' status only when they are also
+        // archived/Cancelled; lowercase 'enrolled' rows from store() have year_level = null
+        // and therefore do not match any TERM_ORDER key, so they are harmless here.
         $enrollments = Enrollment::where('student_id', $student->student_id)
             ->whereNull('deleted_at')
             ->whereNotIn('status', ['archived', 'Cancelled'])
             ->with('subject')
             ->get();
 
-        // If no enrollments exist, the next term is 1st year, 1st semester
+        // If no real year_level-bearing enrollments exist, start at term 1
         if ($enrollments->isEmpty()) {
             $academicYear = $this->computeAcademicYearForTerm($student, 1, 1);
-            $allowedYears = $this->computeAllowedAcademicYears($student);
-
-            if (!in_array($academicYear, $allowedYears)) {
-                return [
-                    'year_level' => 1,
-                    'semester' => 1,
-                    'academic_year' => $academicYear,
-                    'can_add' => false,
-                    'blocking_reason' => "Academic year {$academicYear} is outside the student's allowed range.",
-                ];
-            }
-
             return [
                 'year_level' => 1,
                 'semester' => 1,
@@ -236,30 +238,140 @@ class AcademicProgressionService
         $nextTermIndex = $latestTermIndex + 1;
 
         if ($nextTermIndex >= count(self::TERM_ORDER)) {
-            // All 8 terms completed
+            // All 8 regular terms have been processed — check if all required
+            // curriculum subjects are actually passed/credited before declaring
+            // the student "ready to graduate".
+            $remainingSubjectIds = $this->getRemainingCurriculumSubjectIds($student);
+
+            if (empty($remainingSubjectIds)) {
+                // Truly completed — all curriculum subjects passed or credited
+                return [
+                    'year_level' => null,
+                    'semester' => null,
+                    'academic_year' => null,
+                    'can_add' => false,
+                    'blocking_reason' => 'All terms for the program have been completed.',
+                    'program_completed' => true,
+                ];
+            }
+
+            // Student still has unfinished required subjects — enter 5th-year extension.
+            // The 5th academic year (AY5) starts 4 years after the first enrollment year.
+            // NOTE: We do NOT use computeAllowedAcademicYears() here because that method
+            // caps allowed years at graduation_date, which may be set to the student's
+            // *expected* graduation year and would wrongly exclude the extension year.
+            // Instead we enforce the 5-year / 10-semester policy directly via a count.
+            $startYear = Carbon::parse($student->enrollment_date)->year;
+            $fifthAYStart = $startYear + 4;
+            $fifthYearAY = "{$fifthAYStart}-" . ($fifthAYStart + 1);
+
+            // Fetch all 5th-year enrollments (semester 1 and 2 of the 5th AY)
+            // No up-front slot-count guard here: the sequential semester checks
+            // below cover every case, including "both semesters exhausted".
+            $fifthYearEnrollments = Enrollment::where('student_id', $student->student_id)
+                ->where('academic_year', $fifthYearAY)
+                ->whereNull('deleted_at')
+                ->whereNotIn('status', ['archived', 'Cancelled'])
+                ->with('subject')
+                ->get();
+
+            $usedSemesters = $fifthYearEnrollments->pluck('semester')->unique()->map(fn($s) => (int) $s)->toArray();
+
+            // Helper: are all enrollments in a given semester finalized?
+            $checkSemComplete = function (int $sem) use ($student, $fifthYearAY, $fifthYearEnrollments) {
+                $semGroup = $fifthYearEnrollments->filter(fn($e) => (int) $e->semester === $sem);
+                if ($semGroup->isEmpty()) {
+                    return ['complete' => true, 'incomplete_subjects' => []]; // nothing enrolled yet
+                }
+                $allDone = true;
+                $missing = [];
+                foreach ($semGroup as $enrollment) {
+                    $grade = Grade::where('student_id', $student->student_id)
+                        ->where('subject_id', $enrollment->subject_id)
+                        ->where('academic_year', $fifthYearAY)
+                        ->where('semester', $sem)
+                        ->first();
+                    $hasFinal = $grade && (
+                        ($grade->status && in_array($grade->status, self::FINAL_STATUSES))
+                        || $grade->grade_value !== null
+                        || ($grade->remarks && in_array(strtoupper($grade->remarks), ['PASSED', 'FAILED', 'INC', 'WITHDRAWN', 'FDA', 'CREDITED']))
+                    );
+                    if (!$hasFinal) {
+                        $allDone = false;
+                        $missing[] = $enrollment->subject?->code ?? "Subject #{$enrollment->subject_id}";
+                    }
+                }
+                return ['complete' => $allDone, 'incomplete_subjects' => $missing];
+            };
+
+            // ── 5th year, Semester 1 ──────────────────────────────────────────
+            if (!in_array(1, $usedSemesters)) {
+                return [
+                    'year_level' => 5,
+                    'semester' => 1,
+                    'academic_year' => $fifthYearAY,
+                    'can_add' => true,
+                    'blocking_reason' => null,
+                    'is_fifth_year_extension' => true,
+                ];
+            }
+
+            $sem1 = $checkSemComplete(1);
+            if (!$sem1['complete']) {
+                return [
+                    'year_level' => 5,
+                    'semester' => 1,
+                    'academic_year' => $fifthYearAY,
+                    'can_add' => false,
+                    'blocking_reason' => 'Complete grades or final statuses for 5th Year, 1st Semester, A.Y. ' . $fifthYearAY . ' before adding the next semester.',
+                    'incomplete_subjects' => $sem1['incomplete_subjects'],
+                    'is_fifth_year_extension' => true,
+                ];
+            }
+
+            // ── 5th year, Semester 2 ──────────────────────────────────────────
+            if (!in_array(2, $usedSemesters)) {
+                return [
+                    'year_level' => 5,
+                    'semester' => 2,
+                    'academic_year' => $fifthYearAY,
+                    'can_add' => true,
+                    'blocking_reason' => null,
+                    'is_fifth_year_extension' => true,
+                ];
+            }
+
+            $sem2 = $checkSemComplete(2);
+            if (!$sem2['complete']) {
+                return [
+                    'year_level' => 5,
+                    'semester' => 2,
+                    'academic_year' => $fifthYearAY,
+                    'can_add' => false,
+                    'blocking_reason' => 'Complete grades or final statuses for 5th Year, 2nd Semester, A.Y. ' . $fifthYearAY . ' before adding the next semester.',
+                    'incomplete_subjects' => $sem2['incomplete_subjects'],
+                    'is_fifth_year_extension' => true,
+                ];
+            }
+
+            // Both 5th-year semesters are complete but student still has remaining subjects —
+            // maximum residency has been fully consumed.
             return [
-                'year_level' => null,
-                'semester' => null,
-                'academic_year' => null,
-                'can_add' => false,
-                'blocking_reason' => 'All terms for the 4-year program have been completed.',
-                'program_completed' => true,
+                'year_level'              => null,
+                'semester'                => null,
+                'academic_year'           => null,
+                'can_add'                 => false,
+                'blocking_reason'         => 'Student is no longer eligible to enroll because the maximum residency period has been reached. Remaining academic requirements can no longer be completed within the allowed residency period.',
+                'ineligible_max_residency' => true,
             ];
         }
 
+        // Terms 1–8 are always valid by program structure. The academic year is
+        // derived deterministically from enrollment_date + year_level offset, so
+        // no computeAllowedAcademicYears() gate is needed here. That method is
+        // kept for display purposes only (allowed_academic_years in the response).
         $nextTerm = self::TERM_ORDER[$nextTermIndex];
         $nextAY = $this->computeAcademicYearForTerm($student, $nextTerm['year_level'], $nextTerm['semester']);
-        $allowedYears = $this->computeAllowedAcademicYears($student);
-
-        if (!in_array($nextAY, $allowedYears)) {
-            return [
-                'year_level' => $nextTerm['year_level'],
-                'semester' => $nextTerm['semester'],
-                'academic_year' => $nextAY,
-                'can_add' => false,
-                'blocking_reason' => "Academic year {$nextAY} is outside the student's allowed range.",
-            ];
-        }
 
         return [
             'year_level' => $nextTerm['year_level'],
@@ -279,12 +391,22 @@ class AcademicProgressionService
             return [];
         }
 
-        // Get curriculum subjects for this term
-        $curriculumEntries = Curriculum::with(['subject', 'prerequisites', 'prerequisite'])
-            ->where('program_id', $student->program_id)
-            ->where('year_level', $yearLevel)
-            ->where('semester', $semester)
-            ->get();
+        // Get curriculum subjects for this term.
+        // For the 5th-year extension (year_level >= 5) there are no curriculum
+        // entries mapped to year 5, so we return ALL remaining subjects across
+        // all years/semesters so students can retake or complete any outstanding
+        // requirement in the extension year.
+        if ($yearLevel >= 5) {
+            $curriculumEntries = Curriculum::with(['subject', 'prerequisites', 'prerequisite'])
+                ->where('program_id', $student->program_id)
+                ->get();
+        } else {
+            $curriculumEntries = Curriculum::with(['subject', 'prerequisites', 'prerequisite'])
+                ->where('program_id', $student->program_id)
+                ->where('year_level', $yearLevel)
+                ->where('semester', $semester)
+                ->get();
+        }
 
         // Get all subject IDs the student has already passed or credited
         $passedSubjectIds = $this->getPassedSubjectIds($student);
@@ -292,8 +414,8 @@ class AcademicProgressionService
         // "Actively enrolled" means: Enrolled status in the exact next term (AY + semester).
         // Old Failed/Withdrawn/FDA records are intentionally excluded so they never
         // block a student from seeing or selecting a retake subject.
-        $nextTerm               = $this->computeNextAllowedTerm($student);
-        $activelyEnrolledIds    = Enrollment::where('student_id', $student->student_id)
+        $nextTerm = $this->computeNextAllowedTerm($student);
+        $activelyEnrolledIds = Enrollment::where('student_id', $student->student_id)
             ->where('academic_year', $nextTerm['academic_year'] ?? '')
             ->where('semester', $semester)
             ->where('status', 'Enrolled')
@@ -310,7 +432,8 @@ class AcademicProgressionService
             $subjectId = $entry->subject_id;
             $subject = $entry->subject;
 
-            if (!$subject) continue;
+            if (!$subject)
+                continue;
 
             // Skip if already passed or credited
             if (in_array($subjectId, $passedSubjectIds)) {
@@ -329,23 +452,23 @@ class AcademicProgressionService
             if (!empty($unresolvedPrereqs)) {
                 $unresolvedDisplay = implode(', ', $unresolvedPrereqs);
                 $available[] = [
-                    'curriculum_id'        => $entry->id,
-                    'subject_id'           => $subjectId,
-                    'subject_code'         => $subject->code,
-                    'subject_title'        => $subject->title,
-                    'units'                => $subject->units,
-                    'year_level'           => $entry->year_level,
-                    'semester'             => $entry->semester,
-                    'prerequisite_id'      => null,
-                    'prerequisite_code'    => $unresolvedDisplay,
-                    'prerequisite_status'  => 'unresolved',
-                    'prerequisite_codes'   => $unresolvedPrereqs,
+                    'curriculum_id' => $entry->id,
+                    'subject_id' => $subjectId,
+                    'subject_code' => $subject->code,
+                    'subject_title' => $subject->title,
+                    'units' => $subject->units,
+                    'year_level' => $entry->year_level,
+                    'semester' => $entry->semester,
+                    'prerequisite_id' => null,
+                    'prerequisite_code' => $unresolvedDisplay,
+                    'prerequisite_status' => 'unresolved',
+                    'prerequisite_codes' => $unresolvedPrereqs,
                     'prerequisite_display' => $unresolvedDisplay,
                     'missing_prerequisites' => $unresolvedPrereqs,
-                    'eligible'             => false,
-                    'is_retake'            => false,
-                    'is_already_enrolled'  => $isActivelyEnrolled,
-                    'blocked_reason'       =>
+                    'eligible' => false,
+                    'is_retake' => false,
+                    'is_already_enrolled' => $isActivelyEnrolled,
+                    'blocked_reason' =>
                         "Unresolved prerequisite: {$unresolvedDisplay}. " .
                         "Registrar must verify curriculum mapping before this subject can be enrolled.",
                 ];
@@ -418,10 +541,10 @@ class AcademicProgressionService
                             ->whereIn('subject_id', $missingIds)
                             ->where(function ($q) {
                                 $q->whereIn('status', self::RETAKE_STATUSES)
-                                  ->orWhere(function ($inner) {
-                                      $inner->where('grade_value', 5.00)
+                                    ->orWhere(function ($inner) {
+                                        $inner->where('grade_value', 5.00)
                                             ->whereNull('status');
-                                  });
+                                    });
                             })
                             ->exists();
 
@@ -444,10 +567,10 @@ class AcademicProgressionService
                 ->where('subject_id', $subjectId)
                 ->where(function ($q) {
                     $q->whereIn('status', self::RETAKE_STATUSES)
-                      ->orWhere(function ($inner) {
-                          $inner->where('grade_value', 5.00)
+                        ->orWhere(function ($inner) {
+                            $inner->where('grade_value', 5.00)
                                 ->whereNull('status');
-                      });
+                        });
                 })
                 ->first();
 
@@ -515,11 +638,11 @@ class AcademicProgressionService
         $retakeGrades = Grade::where('student_id', $student->student_id)
             ->where(function ($q) {
                 $q->whereIn('status', self::RETAKE_STATUSES)
-                  ->orWhere(function ($inner) {
-                      $inner->where('grade_value', 5.00)
+                    ->orWhere(function ($inner) {
+                        $inner->where('grade_value', 5.00)
                             ->whereNull('status');
-                  })
-                  ->orWhereIn('remarks', ['FAILED', 'Failed', 'WITHDRAWN', 'Withdrawn', 'FDA']);
+                    })
+                    ->orWhereIn('remarks', ['FAILED', 'Failed', 'WITHDRAWN', 'Withdrawn', 'FDA']);
             })
             ->with('subject')
             ->get();
@@ -617,13 +740,21 @@ class AcademicProgressionService
     {
         $student->load('program');
 
-        $allowedYears        = $this->computeAllowedAcademicYears($student);
-        $nextTerm            = $this->computeNextAllowedTerm($student);
-        $groupedEnrollments  = $this->getGroupedEnrollments($student);
+        $allowedYears = $this->computeAllowedAcademicYears($student);
+        $nextTerm = $this->computeNextAllowedTerm($student);
+        $groupedEnrollments = $this->getGroupedEnrollments($student);
+
+        // ── Residency data (informational only) ─────────────────────────────
+        // computeNextAllowedTerm() is the sole source of truth for blocking.
+        // The residency service provides supplemental display data only
+        // (remaining subjects, units, etc.) and must NOT override can_add.
+        $residencyService = app(AcademicResidencyValidationService::class);
+        $residency = $residencyService->computeResidency($student);
+        // ─────────────────────────────────────────────────────────────────────
 
         // ── Retake eligibility (delegated to RetakeEligibilityService) ──────
         $retakeService = app(RetakeEligibilityService::class);
-        $retakeData    = $retakeService->getRetakeEligibility($student, $nextTerm);
+        $retakeData = $retakeService->getRetakeEligibility($student, $nextTerm);
         // ─────────────────────────────────────────────────────────────────────
 
         $availableSubjects = [];
@@ -641,8 +772,8 @@ class AcademicProgressionService
         //   1. It is not already present in $availableSubjects (duplicate guard).
         //   2. It is not already enrolled for the exact next AY + semester.
         //   3. Its own prerequisites (if any) are still met.
-        $existingSubjectIds  = array_column($availableSubjects, 'subject_id');
-        $retakePassedIds     = $this->getPassedSubjectIds($student);
+        $existingSubjectIds = array_column($availableSubjects, 'subject_id');
+        $retakePassedIds = $this->getPassedSubjectIds($student);
 
         foreach ($retakeData['retake_subjects_available'] as $retakeSubj) {
             if (in_array($retakeSubj['subject_id'], $existingSubjectIds)) {
@@ -650,10 +781,10 @@ class AcademicProgressionService
             }
 
             // ── Prerequisite check for this retake subject ──────────────────
-            $prereqCodes    = [];
+            $prereqCodes = [];
             $missingPrereqs = [];
             $retakeEligible = true;
-            $blockedReason  = null;
+            $blockedReason = null;
 
             $prereqEntry = Curriculum::with(['prerequisites', 'prerequisite'])
                 ->where('program_id', $student->program_id)
@@ -662,23 +793,25 @@ class AcademicProgressionService
 
             if ($prereqEntry) {
                 if ($prereqEntry->prerequisites->isNotEmpty()) {
-                    $reqPrereqIds  = $prereqEntry->prerequisites->pluck('id')->toArray();
+                    $reqPrereqIds = $prereqEntry->prerequisites->pluck('id')->toArray();
                     $prereqSubjects = $prereqEntry->prerequisites;
                 } else {
                     $legacyId = $prereqEntry->getAttributes()['prerequisite'] ?? null;
                     if ($legacyId) {
-                        $legacySub     = $prereqEntry->getRelationValue('prerequisite') ?? Subject::find($legacyId);
-                        $reqPrereqIds  = $legacySub ? [$legacyId] : [];
+                        $legacySub = $prereqEntry->getRelationValue('prerequisite') ?? Subject::find($legacyId);
+                        $reqPrereqIds = $legacySub ? [$legacyId] : [];
                         $prereqSubjects = $legacySub ? collect([$legacySub]) : collect();
                     } else {
-                        $reqPrereqIds  = [];
+                        $reqPrereqIds = [];
                         $prereqSubjects = collect();
                     }
                 }
 
                 if (isset($prereqSubjects) && $prereqSubjects->isNotEmpty()) {
                     $prereqLogic = $prereqEntry->prerequisite_logic ?? 'AND';
-                    foreach ($prereqSubjects as $ps) { $prereqCodes[] = $ps->code; }
+                    foreach ($prereqSubjects as $ps) {
+                        $prereqCodes[] = $ps->code;
+                    }
 
                     if ($prereqLogic === 'OR') {
                         $passedPrereqs = array_intersect($reqPrereqIds, $retakePassedIds);
@@ -694,7 +827,9 @@ class AcademicProgressionService
                     if (!empty($missingIds)) {
                         $retakeEligible = false;
                         foreach ($prereqSubjects as $ps) {
-                            if (in_array($ps->id, $missingIds)) { $missingPrereqs[] = $ps->code; }
+                            if (in_array($ps->id, $missingIds)) {
+                                $missingPrereqs[] = $ps->code;
+                            }
                         }
 
                         if (count($missingPrereqs) > 1) {
@@ -714,50 +849,62 @@ class AcademicProgressionService
             // ───────────────────────────────────────────────────────────────
 
             $availableSubjects[] = [
-                'curriculum_id'          => null,
-                'subject_id'             => $retakeSubj['subject_id'],
-                'subject_code'           => $retakeSubj['subject_code'],
-                'subject_title'          => $retakeSubj['subject_title'],
-                'units'                  => $retakeSubj['units'],
-                'year_level'             => $retakeSubj['curriculum_year_level'],
-                'semester'               => $retakeSubj['curriculum_semester'],
-                'prerequisite_id'        => null,
-                'prerequisite_code'      => implode(', ', $prereqCodes) ?: null,
-                'prerequisite_status'    => $retakeEligible ? 'passed' : 'not_taken',
-                'prerequisite_codes'     => $prereqCodes,
-                'prerequisite_display'   => implode(', ', $prereqCodes) ?: null,
-                'missing_prerequisites'  => $missingPrereqs,
-                'eligible'               => $retakeEligible,
-                'is_retake'              => true,
-                'is_already_enrolled'    => false,
-                'blocked_reason'         => $blockedReason,
+                'curriculum_id' => null,
+                'subject_id' => $retakeSubj['subject_id'],
+                'subject_code' => $retakeSubj['subject_code'],
+                'subject_title' => $retakeSubj['subject_title'],
+                'units' => $retakeSubj['units'],
+                'year_level' => $retakeSubj['curriculum_year_level'],
+                'semester' => $retakeSubj['curriculum_semester'],
+                'prerequisite_id' => null,
+                'prerequisite_code' => implode(', ', $prereqCodes) ?: null,
+                'prerequisite_status' => $retakeEligible ? 'passed' : 'not_taken',
+                'prerequisite_codes' => $prereqCodes,
+                'prerequisite_display' => implode(', ', $prereqCodes) ?: null,
+                'missing_prerequisites' => $missingPrereqs,
+                'eligible' => $retakeEligible,
+                'is_retake' => true,
+                'is_already_enrolled' => false,
+                'blocked_reason' => $blockedReason,
                 'previous_academic_year' => $retakeSubj['previous_academic_year'],
-                'previous_semester'      => $retakeSubj['previous_semester'],
-                'previous_year_level'    => $retakeSubj['previous_year_level'],
+                'previous_semester' => $retakeSubj['previous_semester'],
+                'previous_year_level' => $retakeSubj['previous_year_level'],
                 'previous_enrollment_id' => $retakeSubj['previous_enrollment_id'],
-                'latest_status'          => $retakeSubj['latest_status'],
-                'grade_value'            => $retakeSubj['grade_value'],
-                'remarks'                => $retakeSubj['remarks'] ?? null,
+                'latest_status' => $retakeSubj['latest_status'],
+                'grade_value' => $retakeSubj['grade_value'],
+                'remarks' => $retakeSubj['remarks'] ?? null,
             ];
         }
         // ─────────────────────────────────────────────────────────────────────
 
+        // Compute max eligible units: sum of units for every eligible subject the student
+        // could choose from. Used by the frontend unit counter and backend load validation
+        // to determine whether an underload exception applies.
+        $maxEligibleUnits = 0;
+        foreach ($availableSubjects as $subj) {
+            if ($subj['eligible'] ?? false) {
+                $maxEligibleUnits += (int) ($subj['units'] ?? 0);
+            }
+        }
+
         return [
-            'student_id'                  => $student->student_id,
-            'program'                     => $student->program?->code ?? null,
-            'program_name'                => $student->program?->name ?? null,
-            'enrollment_date'             => $student->enrollment_date?->toDateString(),
-            'graduation_date'             => $student->graduation_date?->toDateString(),
-            'allowed_academic_years'      => $allowedYears,
-            'next_allowed_term'           => $nextTerm,
-            'grouped_enrollments'         => $groupedEnrollments,
-            'available_subjects'          => $availableSubjects,
+            'student_id' => $student->student_id,
+            'program' => $student->program?->code ?? null,
+            'program_name' => $student->program?->name ?? null,
+            'enrollment_date' => $student->enrollment_date?->toDateString(),
+            'graduation_date' => $student->graduation_date?->toDateString(),
+            'allowed_academic_years' => $allowedYears,
+            'next_allowed_term' => $nextTerm,
+            'grouped_enrollments' => $groupedEnrollments,
+            'available_subjects' => $availableSubjects,
+            'max_eligible_units' => $maxEligibleUnits,
+            'residency' => $residency,
             // Legacy key kept for backward compatibility:
-            'retake_subjects'             => $retakeData['retake_subjects_required'],
+            'retake_subjects' => $retakeData['retake_subjects_required'],
             // New structured retake keys:
-            'retake_subjects_required'    => $retakeData['retake_subjects_required'],
-            'retake_subjects_available'   => $retakeData['retake_subjects_available'],
-            'inc_subjects'                => $retakeData['inc_subjects'],
+            'retake_subjects_required' => $retakeData['retake_subjects_required'],
+            'retake_subjects_available' => $retakeData['retake_subjects_available'],
+            'inc_subjects' => $retakeData['inc_subjects'],
         ];
     }
 
@@ -778,13 +925,13 @@ class AcademicProgressionService
 
         if (!$nextTerm['can_add']) {
             return [
-                'valid'  => false,
+                'valid' => false,
                 'errors' => [$nextTerm['blocking_reason']],
             ];
         }
 
-        $yearLevel    = $nextTerm['year_level'];
-        $semester     = $nextTerm['semester'];
+        $yearLevel = $nextTerm['year_level'];
+        $semester = $nextTerm['semester'];
         $academicYear = $nextTerm['academic_year'];
 
         // ── Auto-classify: separate retake subjects from regular subjects ────
@@ -792,12 +939,12 @@ class AcademicProgressionService
         // from the merged available_subjects table), we need to automatically
         // split out any that are retake candidates so they pass the correct
         // validation path instead of being rejected as "not in curriculum Y/S".
-        $retakeService       = app(RetakeEligibilityService::class);
-        $eligibility         = $retakeService->getRetakeEligibility($student, $nextTerm);
-        $availableRetakeIds  = array_column($eligibility['retake_subjects_available'], 'subject_id');
+        $retakeService = app(RetakeEligibilityService::class);
+        $eligibility = $retakeService->getRetakeEligibility($student, $nextTerm);
+        $availableRetakeIds = array_column($eligibility['retake_subjects_available'], 'subject_id');
 
         $autoDetectedRetakeIds = [];
-        $regularSubjectIds     = [];
+        $regularSubjectIds = [];
 
         foreach ($subjectIds as $subjectId) {
             if (in_array($subjectId, $availableRetakeIds)) {
@@ -812,19 +959,27 @@ class AcademicProgressionService
         // ─────────────────────────────────────────────────────────────────────
 
         // ── Regular subjects ─────────────────────────────────────────────────
-        $validCurriculumIds = Curriculum::where('program_id', $student->program_id)
-            ->where('year_level', $yearLevel)
-            ->where('semester', $semester)
-            ->pluck('subject_id')
-            ->toArray();
+        // 5th-year extension: any remaining curriculum subject (from any year/semester)
+        // is valid since the student is completing outstanding requirements.
+        if ($yearLevel >= 5) {
+            $validCurriculumIds = Curriculum::where('program_id', $student->program_id)
+                ->pluck('subject_id')
+                ->toArray();
+        } else {
+            $validCurriculumIds = Curriculum::where('program_id', $student->program_id)
+                ->where('year_level', $yearLevel)
+                ->where('semester', $semester)
+                ->pluck('subject_id')
+                ->toArray();
+        }
 
         $passedSubjectIds = $this->getPassedSubjectIds($student);
-        $errors           = [];
-        $validatedIds     = [];
+        $errors = [];
+        $validatedIds = [];
 
         foreach ($regularSubjectIds as $subjectId) {
             $subject = Subject::find($subjectId);
-            $code    = $subject?->code ?? "Subject #{$subjectId}";
+            $code = $subject?->code ?? "Subject #{$subjectId}";
 
             // Must belong to curriculum for this term
             if (!in_array($subjectId, $validCurriculumIds)) {
@@ -863,27 +1018,27 @@ class AcademicProgressionService
                 if (!empty($unresolvedPrereqs)) {
                     $unresolvedDisplay = implode(', ', $unresolvedPrereqs);
                     $errors[] = "{$code} cannot be enrolled: unresolved prerequisite(s) '{$unresolvedDisplay}'. " .
-                                "Registrar must verify curriculum mapping.";
+                        "Registrar must verify curriculum mapping.";
                     continue;
                 }
 
                 if ($prereqEntry->prerequisites->isNotEmpty()) {
                     $requiredPrereqIds = $prereqEntry->prerequisites->pluck('id')->toArray();
-                    $prereqSubjects    = $prereqEntry->prerequisites;
+                    $prereqSubjects = $prereqEntry->prerequisites;
                 } else {
                     $legacyId = $prereqEntry->getAttributes()['prerequisite'] ?? null;
                     if ($legacyId) {
                         $legacySubject = $prereqEntry->getRelationValue('prerequisite') ?? Subject::find($legacyId);
                         if ($legacySubject) {
                             $requiredPrereqIds = [$legacyId];
-                            $prereqSubjects    = collect([$legacySubject]);
+                            $prereqSubjects = collect([$legacySubject]);
                         } else {
                             $requiredPrereqIds = [];
-                            $prereqSubjects    = collect();
+                            $prereqSubjects = collect();
                         }
                     } else {
                         $requiredPrereqIds = [];
-                        $prereqSubjects    = collect();
+                        $prereqSubjects = collect();
                     }
                 }
 
@@ -933,34 +1088,34 @@ class AcademicProgressionService
         // ── Retake subjects ──────────────────────────────────────────────────
         $validatedRetakeIds = [];
         if (!empty($allRetakeIds)) {
-            $retakeResult       = $retakeService->validateRetakeSubjects($student, $allRetakeIds, $nextTerm);
+            $retakeResult = $retakeService->validateRetakeSubjects($student, $allRetakeIds, $nextTerm);
             $validatedRetakeIds = $retakeResult['valid_ids'];
-            $errors             = array_merge($errors, $retakeResult['errors']);
+            $errors = array_merge($errors, $retakeResult['errors']);
         }
         // ─────────────────────────────────────────────────────────────────────
 
         if (!empty($errors)) {
             return [
-                'valid'  => false,
+                'valid' => false,
                 'errors' => $errors,
             ];
         }
 
         if (empty($validatedIds) && empty($validatedRetakeIds)) {
             return [
-                'valid'  => false,
+                'valid' => false,
                 'errors' => ['No valid subjects to enroll.'],
             ];
         }
 
         return [
-            'valid'  => true,
+            'valid' => true,
             'errors' => [],
-            'data'   => [
-                'subject_ids'   => $validatedIds,
-                'retake_ids'    => $validatedRetakeIds,
-                'year_level'    => $yearLevel,
-                'semester'      => $semester,
+            'data' => [
+                'subject_ids' => $validatedIds,
+                'retake_ids' => $validatedRetakeIds,
+                'year_level' => $yearLevel,
+                'semester' => $semester,
                 'academic_year' => $academicYear,
             ],
         ];
@@ -1064,7 +1219,8 @@ class AcademicProgressionService
         foreach ($curriculum as $item) {
             $subjectId = $item->subject_id;
             $subject = $item->subject;
-            if (!$subject) continue;
+            if (!$subject)
+                continue;
 
             $totalCurriculumUnits += $subject->units;
 
@@ -1081,7 +1237,8 @@ class AcademicProgressionService
             if ($prereqSubjects->isEmpty() && ($item->getAttributes()['prerequisite'] ?? null)) {
                 $legacyId = $item->getAttributes()['prerequisite'];
                 $legacySub = Subject::find($legacyId);
-                if ($legacySub) $prereqSubjects = collect([$legacySub]);
+                if ($legacySub)
+                    $prereqSubjects = collect([$legacySub]);
             }
 
             $prereqCodes = [];
@@ -1178,6 +1335,23 @@ class AcademicProgressionService
     // ── Private helpers ─────────────────────────────────────────────────
 
     /**
+     * Return curriculum subject IDs for this student's program that have NOT
+     * yet been passed or credited. Used to decide whether "program_completed"
+     * is genuinely true or whether a 5th-year extension is needed.
+     */
+    private function getRemainingCurriculumSubjectIds(Student $student): array
+    {
+        if (!$student->program_id) {
+            return [];
+        }
+        $curriculumIds = Curriculum::where('program_id', $student->program_id)
+            ->pluck('subject_id')
+            ->toArray();
+        $passedIds = $this->getPassedSubjectIds($student);
+        return array_values(array_diff($curriculumIds, $passedIds));
+    }
+
+    /**
      * Get all subject IDs the student has passed or credited.
      */
     private function getPassedSubjectIds(Student $student): array
@@ -1185,18 +1359,18 @@ class AcademicProgressionService
         return Grade::where('student_id', $student->student_id)
             ->where(function ($q) {
                 $q->whereIn('status', self::PASSED_STATUSES)
-                  ->orWhere(function ($inner) {
-                      // Legacy: grade 1.00-3.00 without status column
-                      $inner->whereNotNull('grade_value')
+                    ->orWhere(function ($inner) {
+                        // Legacy: grade 1.00-3.00 without status column
+                        $inner->whereNotNull('grade_value')
                             ->where('grade_value', '>=', 1.00)
                             ->where('grade_value', '<=', 3.00)
                             ->whereNull('status');
-                  })
-                  ->orWhere(function ($inner) {
-                      // Legacy: remarks-based
-                      $inner->whereNull('status')
+                    })
+                    ->orWhere(function ($inner) {
+                        // Legacy: remarks-based
+                        $inner->whereNull('status')
                             ->whereIn('remarks', ['PASSED', 'Passed', 'CREDITED', 'Credited']);
-                  });
+                    });
             })
             ->pluck('subject_id')
             ->unique()
@@ -1211,13 +1385,13 @@ class AcademicProgressionService
         return Grade::where('student_id', $student->student_id)
             ->where(function ($q) {
                 $q->where('status', 'INC')
-                  ->orWhere(function ($inner) {
-                      $inner->whereNull('status')
+                    ->orWhere(function ($inner) {
+                        $inner->whereNull('status')
                             ->where(function ($sub) {
                                 $sub->where('grade_value', 4.00)
                                     ->orWhereIn('remarks', ['INC', 'inc']);
                             });
-                  });
+                    });
             })
             ->pluck('subject_id')
             ->unique()

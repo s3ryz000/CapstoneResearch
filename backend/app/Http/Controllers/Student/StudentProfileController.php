@@ -289,6 +289,9 @@ class StudentProfileController extends Controller
         
         $summary = $standingService->getAcademicSummary($student);
         $roadmapData = $progressionService->getCurriculumRoadmap($student);
+        
+        $residencyService = app(\App\Services\AcademicResidencyValidationService::class);
+        $residency = $residencyService->computeResidency($student);
 
         // Compute Notifications
         $notifications = [];
@@ -317,7 +320,8 @@ class StudentProfileController extends Controller
             ],
             'summary' => $summary,
             'curriculum' => $roadmapData,
-            'notifications' => $notifications
+            'notifications' => $notifications,
+            'residency' => $residency
         ]);
     }
 }

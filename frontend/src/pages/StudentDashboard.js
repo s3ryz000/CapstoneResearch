@@ -11,6 +11,8 @@ import {
   FiTrendingUp,
   FiBookOpen,
   FiLayers,
+  FiXCircle,
+  FiAlertTriangle,
 } from 'react-icons/fi';
 import { studentApi } from '../lib/api/studentApi';
 
@@ -128,6 +130,33 @@ const StudentDashboard = () => {
             <FiInfo className="sd-info-icon" />
             Access your full curriculum roadmap, grades, and academic standing below.
           </p>
+
+          {academicSummary?.residency?.residency_status === 'ineligible_max_residency' && (
+            <div className="mb-6 p-4 bg-red-50 rounded-lg border border-red-200 text-red-800 flex items-start gap-3">
+              <FiXCircle className="text-red-600 text-xl mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold m-0 text-sm text-red-900">Enrollment Ineligible</p>
+                <p className="m-0 mt-1 text-sm font-medium text-red-700">Maximum Residency Period Reached</p>
+                <p className="m-0 mt-1 text-sm">
+                  Student is no longer eligible to enroll because the maximum residency period has been reached.
+                  Remaining academic requirements can no longer be completed within the allowed residency period.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {academicSummary?.residency?.residency_status === 'fifth_year_extension' && (
+            <div className="mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200 flex items-start gap-3">
+              <FiAlertTriangle className="text-amber-600 text-xl mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold m-0 text-sm text-amber-900">5th-Year Extension Period</p>
+                <p className="m-0 mt-1 text-sm text-amber-800">
+                  You are currently in the 5th-year extension period (maximum residency: 5 years).
+                  Enrollment is allowed only for remaining required subjects and retakes.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="sd-quick-links" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
             <button 

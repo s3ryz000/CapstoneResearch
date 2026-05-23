@@ -232,31 +232,34 @@ class AcademicStandingService
 
     private function evaluateHonorGrades($grades): array
     {
+        $issues = [];
+
         foreach ($grades as $grade) {
             $code = $grade->subject?->code ?? 'Unknown Subject';
 
             if ($grade->status === 'Enrolled') {
-                return [
-                    'eligible' => false,
-                    'reason' => "Still enrolled in $code. Grades are incomplete."
-                ];
+                $issues[] = "still enrolled in {$code}";
+                continue;
             }
 
             if (in_array($grade->status, ['Failed', 'INC', 'FDA', 'DRP', 'Withdrawn', 'Cancelled'])) {
-                return [
-                    'eligible' => false,
-                    'reason' => "Has a {$grade->status} grade in $code."
-                ];
+                $issues[] = "{$grade->status} in {$code}";
+                continue;
             }
 
             if ($grade->grade_value !== null && $grade->grade_value > 2.00) {
-                return [
-                    'eligible' => false,
-                    'reason' => "Grade in $code is {$grade->grade_value}, which is lower than 2.00."
-                ];
+                $issues[] = "{$code} ({$grade->grade_value})";
             }
         }
 
-        return ['eligible' => true, 'reason' => 'Meets all requirements.'];
+        if (empty($issues)) {
+            return ['eligible' => true, 'reason' => 'Meets all requirements.'];
+        }
+
+        $list = implode(', ', $issues);
+        return [
+            'eligible' => false,
+            'reason'   => "Not eligible due to: {$list}.",
+        ];
     }
 }

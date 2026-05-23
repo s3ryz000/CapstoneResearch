@@ -133,6 +133,10 @@ trait CurriculumSeederHelper
             $prerequisites = $row['prerequisites'] ?? [];
 
             if (empty($prerequisites)) {
+                if ($curriculum = $curriculumMap[$code] ?? null) {
+                    $curriculum->prerequisites()->sync([]);
+                    $curriculum->update(['unresolved_prerequisites' => null]);
+                }
                 continue;
             }
 
@@ -175,9 +179,7 @@ trait CurriculumSeederHelper
             }
 
             // Persist relational prerequisites (resolved ones)
-            if (!empty($prereqSubjectIds)) {
-                $curriculum->prerequisites()->sync(array_unique($prereqSubjectIds));
-            }
+            $curriculum->prerequisites()->sync(array_unique($prereqSubjectIds));
 
             // Persist unresolved prerequisite codes to the DB column
             if (!empty($unresolvedForThis)) {

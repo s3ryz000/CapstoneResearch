@@ -231,7 +231,7 @@ class BshmCurriculumSeeder extends Seeder
                 'units' => 3,
                 'year_level' => 2,
                 'semester' => 1,
-                'prerequisites' => ['GE 4'],
+                'prerequisites' => [],
                 'description' => 'BSHM - Second Year - First Semester',
             ],
 
@@ -342,7 +342,7 @@ class BshmCurriculumSeeder extends Seeder
                 'units' => 3,
                 'year_level' => 3,
                 'semester' => 1,
-                'prerequisites' => ['TPC 3'],
+                'prerequisites' => ['THC 3'],
                 'description' => 'BSHM - Third Year - First Semester',
             ],
             [
@@ -360,7 +360,7 @@ class BshmCurriculumSeeder extends Seeder
                 'units' => 3,
                 'year_level' => 3,
                 'semester' => 1,
-                'prerequisites' => ['TPC 3'],
+                'prerequisites' => ['THC 3'],
                 'description' => 'BSHM - Third Year - First Semester',
             ],
             [

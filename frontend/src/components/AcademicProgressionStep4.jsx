@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FiPlus, FiSave, FiAlertCircle, FiTrash2, FiClock, FiAward } from 'react-icons/fi';
+import { FiPlus, FiSave, FiAlertCircle, FiTrash2, FiClock, FiAward, FiCheckCircle, FiAlertTriangle, FiXCircle, FiInfo } from 'react-icons/fi';
 
 import { staffApi } from '../lib/api/staffApi';
 import { staffToast } from '../lib/notifications';
@@ -49,9 +49,9 @@ export default function AcademicProgressionStep4({
       queryClient.invalidateQueries({ queryKey: queryKeys.student(studentId) });
       setSelectedSubjects([]);
     },
-    onError: (err) => {
-      const msg = err.response?.data?.message || 'Failed to add enrollments.';
-      staffToast.error(msg);
+    onError: () => {
+      // Enrollment errors are surfaced inline by the backend validation response;
+      // suppress the generic toast to avoid duplicate / confusing pop-ups.
     },
   });
 
@@ -209,6 +209,35 @@ export default function AcademicProgressionStep4({
     }
   }, [progress?.available_subjects]);
 
+  // ── Academic load constants ──────────────────────────────────────────────
+  const LOAD_MIN = 18;
+  const LOAD_MAX = 26;
+
+  // Sum units for the currently selected subjects (live, derived from checked boxes).
+  // Must be a useMemo (not inline) so it stays above conditional returns.
+  const selectedUnits = React.useMemo(() => {
+    if (!progress?.available_subjects || selectedSubjects.length === 0) return 0;
+    return progress.available_subjects
+      .filter(s => selectedSubjects.includes(s.subject_id))
+      .reduce((sum, s) => sum + (Number(s.units) || 0), 0);
+  }, [selectedSubjects, progress?.available_subjects]);
+
+  // Total units the student could enroll in (eligible subjects only).
+  // Comes from the backend so it reflects actual curriculum + prerequisite state.
+  const maxEligibleUnits = progress?.max_eligible_units ?? 0;
+
+  // Derived load status — mirrors backend AcademicLoadValidationService logic.
+  const loadStatus = React.useMemo(() => {
+    if (selectedSubjects.length === 0)    return 'empty';
+    if (selectedUnits > LOAD_MAX)         return 'above_maximum';
+    if (selectedUnits >= LOAD_MIN)        return 'valid';
+    if (maxEligibleUnits < LOAD_MIN)      return 'valid_underload_exception';
+    return 'below_minimum';
+  }, [selectedUnits, maxEligibleUnits, selectedSubjects.length]);
+
+  const isLoadValid = loadStatus === 'valid' || loadStatus === 'valid_underload_exception';
+  // ────────────────────────────────────────────────────────────────────────
+
   if (isLoading) return <div className="p-8 text-center text-gray-500">Loading academic progress...</div>;
   if (error) return <div className="p-8 text-center text-red-500">Failed to load academic progress.</div>;
   if (!progress) return null;
@@ -251,7 +280,7 @@ export default function AcademicProgressionStep4({
           <div className="space-y-8">
             {grouped_enrollments.map((group, idx) => {
               const termSummary = summary?.terms?.find(
-                (t) => t.academic_year === group.academic_year && t.semester === group.semester
+                (t) => t.academic_year === group.academic_year && String(t.semester) === String(group.semester)
               );
 
               return (
@@ -432,11 +461,12 @@ export default function AcademicProgressionStep4({
       )}
 
       {/* ── Add Next Semester ── */}
-      <div className="p-6 bg-white rounded-xl border-l-4 border-green-500 shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
+      <div className={`p-6 bg-white rounded-xl border-l-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100 ${next_allowed_term.ineligible_max_residency ? 'border-red-500' : 'border-green-500'}`}>
         <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">Add Next Term Enrollments</h4>
 
         {!next_allowed_term.can_add ? (
           next_allowed_term.program_completed ? (
+            /* ── GREEN: Truly completed — all curriculum subjects passed ── */
             <div className="p-4 bg-green-50 rounded-lg border border-green-200 text-green-800 flex items-start gap-3">
               <div className="mt-0.5 text-green-600">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -446,7 +476,7 @@ export default function AcademicProgressionStep4({
               <div className="flex-1">
                 <p className="font-semibold m-0 text-base mb-1">Student is ready to graduate</p>
                 <p className="m-0 mt-1 text-sm">{next_allowed_term.blocking_reason}</p>
-                
+
                 {summary && (
                   <div className="mt-4 pt-4 border-t border-green-200 grid grid-cols-1 md:grid-cols-3 gap-4">
                      <div className="bg-white/60 p-3 rounded-lg border border-green-100">
@@ -471,16 +501,64 @@ export default function AcademicProgressionStep4({
                 )}
               </div>
             </div>
+          ) : next_allowed_term.ineligible_max_residency ? (
+            /* ── RED: Maximum residency reached — enrollment ineligible ── */
+            <div className="p-4 bg-red-50 rounded-lg border border-red-200 text-red-800 flex items-start gap-3">
+              <FiXCircle className="text-red-600 text-xl mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold m-0 text-sm text-red-900">Enrollment Ineligible</p>
+                <p className="m-0 mt-1 text-sm font-medium text-red-700">Maximum Residency Period Reached</p>
+                <p className="m-0 mt-1 text-sm">
+                  Student is no longer eligible to enroll because the maximum residency period has been reached.
+                  Remaining academic requirements can no longer be completed within the allowed residency period.
+                </p>
+                {progress.residency?.remaining_required_subjects?.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs font-semibold text-red-700 mb-1">Remaining required subjects ({progress.residency.remaining_required_units} units):</p>
+                    <ul className="text-xs text-red-700 list-disc list-inside space-y-0.5">
+                      {progress.residency.remaining_required_subjects.slice(0, 8).map(s => (
+                        <li key={s.subject_id}>{s.subject_code} – {s.subject_title} ({s.units} units)</li>
+                      ))}
+                      {progress.residency.remaining_required_subjects.length > 8 && (
+                        <li>…and {progress.residency.remaining_required_subjects.length - 8} more</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
+            /* ── YELLOW: Cannot add yet — incomplete grades or other blocking reason ── */
             <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200 text-yellow-800 flex items-start gap-3">
               <FiClock className="text-yellow-600 text-xl mt-0.5" />
               <div>
                 <p className="font-semibold m-0 text-sm">Cannot Add Next Term</p>
                 <p className="m-0 mt-1 text-sm">{next_allowed_term.blocking_reason}</p>
+                {next_allowed_term.is_fifth_year_extension && (
+                  <p className="m-0 mt-2 text-xs text-yellow-700 font-medium">
+                    This student is in the 5th-year extension period. Complete outstanding grades to proceed.
+                  </p>
+                )}
               </div>
             </div>
           )
         ) : (
+          <>
+            {/* ── AMBER WARNING: 5th-year extension period active ── */}
+            {next_allowed_term.is_fifth_year_extension && (
+              <div className="mb-5 p-4 bg-amber-50 rounded-lg border border-amber-200 flex items-start gap-3">
+                <FiAlertTriangle className="text-amber-600 text-xl mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-semibold m-0 text-sm text-amber-900">5th-Year Extension Period</p>
+                  <p className="m-0 mt-1 text-sm text-amber-800">
+                    This student is in the 5th-year extension period (maximum residency: 5 years).
+                    Enrollment is allowed only for remaining required subjects and retakes.
+                    Remaining required units: <strong>{progress.residency?.remaining_required_units ?? '—'}</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
           <form onSubmit={handleAddNextTerm}>
             <div className="flex flex-wrap items-center gap-6 p-4 bg-gray-50 rounded-lg border border-gray-200 mb-6">
               <div>
@@ -545,16 +623,52 @@ export default function AcademicProgressionStep4({
               </table>
             </div>
 
+            {/* ── Academic Load Summary ── */}
+            {(() => {
+              const cfg = {
+                empty:                   { container: 'bg-gray-50 border-gray-200',   badge: 'bg-gray-100 text-gray-500',    icon: FiInfo,          label: 'No Selection',        msg: 'Select subjects to calculate your academic load.' },
+                valid:                   { container: 'bg-green-50 border-green-200', badge: 'bg-green-100 text-green-800', icon: FiCheckCircle,   label: 'Valid Load',          msg: null },
+                valid_underload_exception:{ container: 'bg-amber-50 border-amber-200', badge: 'bg-amber-100 text-amber-800', icon: FiAlertTriangle, label: 'Underload Exception', msg: `Only ${maxEligibleUnits} eligible unit(s) are available for this term due to curriculum and prerequisite constraints. Enrollment is allowed.` },
+                above_maximum:           { container: 'bg-red-50 border-red-200',     badge: 'bg-red-100 text-red-800',     icon: FiXCircle,       label: 'Above Maximum',       msg: `Selected ${selectedUnits} units exceed the ${LOAD_MAX}-unit maximum. Remove subjects before enrolling.` },
+                below_minimum:           { container: 'bg-orange-50 border-orange-200', badge: 'bg-orange-100 text-orange-800', icon: FiAlertTriangle, label: 'Below Minimum',    msg: `Selected units (${selectedUnits}) are below the ${LOAD_MIN}-unit minimum. Add more eligible subjects before enrolling.` },
+              }[loadStatus] ?? { container: 'bg-gray-50 border-gray-200', badge: 'bg-gray-100 text-gray-500', icon: FiInfo, label: 'No Selection', msg: null };
+              const Icon = cfg.icon;
+              return (
+                <div className="mt-4 space-y-1.5">
+                  <div className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3 rounded-lg border ${cfg.container}`}>
+                    <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
+                      <span className="text-gray-700 font-medium">
+                        Selected Units:{' '}
+                        <span className="text-lg font-black">{selectedUnits}</span>
+                        <span className="font-normal text-gray-400"> / {LOAD_MAX}</span>
+                      </span>
+                      <span className="text-gray-500 text-xs">Minimum Required: {LOAD_MIN}</span>
+                    </div>
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${cfg.badge}`}>
+                      <Icon className="shrink-0" />
+                      {cfg.label}
+                    </span>
+                  </div>
+                  {cfg.msg && (
+                    <p className={`text-xs m-0 px-1 ${loadStatus === 'valid_underload_exception' ? 'text-amber-700' : loadStatus === 'above_maximum' || loadStatus === 'below_minimum' ? 'text-red-600' : 'text-gray-500'}`}>
+                      {cfg.msg}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="mt-4 flex justify-end">
               <button
                 type="submit"
-                disabled={addNextTermMutation.isLoading || selectedSubjects.length === 0}
+                disabled={addNextTermMutation.isLoading || !isLoadValid}
                 className="inline-flex items-center gap-2 py-2 px-5 bg-tmcc text-white font-medium rounded-lg hover:bg-tmcc-dark disabled:opacity-50 disabled:cursor-not-allowed shadow"
               >
                 <FiPlus /> Enroll Selected Subjects
               </button>
             </div>
           </form>
+          </>
         )}
       </div>
     </div>
