@@ -74,7 +74,20 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    
+    if (name === 'enrollment_date') {
+      setForm((prev) => {
+        const newForm = { ...prev, enrollment_date: value };
+        if (newForm.graduation_date && value > newForm.graduation_date) {
+          newForm.graduation_date = '';
+          staffToast.warning('Date conflict resolved', 'Graduation date cleared because it cannot be earlier than the new enrollment date.');
+        }
+        return newForm;
+      });
+    } else {
+      setForm((prev) => ({ ...prev, [name]: value }));
+    }
+    
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: null }));
     if (submitStatus) setSubmitStatus(null);
   };
@@ -96,9 +109,17 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
     }
     if (phase === 3) {
       if (!form.program_id) err.program_id = "Program is required.";
-      if (!form.enrollment_date)
+      if (!form.enrollment_date) {
         err.enrollment_date = "Enrollment date is required.";
-
+      } else {
+        const today = new Date().toISOString().slice(0, 10);
+        if (form.enrollment_date > today) {
+          err.enrollment_date = "Enrollment date cannot be later than today.";
+        }
+      }
+      if (form.graduation_date && form.enrollment_date && form.graduation_date < form.enrollment_date) {
+        err.graduation_date = "Graduation date cannot be earlier than enrollment date.";
+      }
     }
     if (phase === 4) {
       if (!form.record_type?.trim()) err.record_type = "Record type is required.";
@@ -123,9 +144,17 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
       err.email = "Enter a valid email.";
     if (!form.program_id) err.program_id = "Program is required.";
-    if (!form.enrollment_date)
+    if (!form.enrollment_date) {
       err.enrollment_date = "Enrollment date is required.";
-
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      if (form.enrollment_date > today) {
+        err.enrollment_date = "Enrollment date cannot be later than today.";
+      }
+    }
+    if (form.graduation_date && form.enrollment_date && form.graduation_date < form.enrollment_date) {
+      err.graduation_date = "Graduation date cannot be earlier than enrollment date.";
+    }
     if (!form.record_type?.trim()) err.record_type = "Record type is required.";
     if (!form.cabinet_no?.trim()) err.cabinet_no = "Cabinet no. is required.";
     if (!form.shelf_no?.trim()) err.shelf_no = "Shelf no. is required.";
@@ -570,6 +599,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
                       type="date"
                       value={form.enrollment_date}
                       onChange={handleChange}
+                      max={new Date().toISOString().slice(0, 10)}
                       className={`${inputBase} ${errors.enrollment_date ? inputError : inputNormal}`}
                       aria-invalid={!!errors.enrollment_date}
                     />
@@ -592,6 +622,7 @@ const StaffNewStudentPage = ({ basePath = "/staff" }) => {
                       type="date"
                       value={form.graduation_date}
                       onChange={handleChange}
+                      min={form.enrollment_date || ''}
                       className={`${inputBase} ${inputNormal}`}
                     />
                   </div>

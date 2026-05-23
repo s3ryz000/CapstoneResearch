@@ -24,4 +24,7 @@ export const staffToast = {
 /** Admin dashboard notifications  */
 export const adminToast = { ...staffToast };
 
+/** Student dashboard notifications */
+export const studentToast = { ...staffToast };
+
 export default staffToast;

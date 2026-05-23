@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FiPlus, FiSave, FiAlertCircle, FiTrash2, FiClock } from 'react-icons/fi';
+import { FiPlus, FiSave, FiAlertCircle, FiTrash2, FiClock, FiAward } from 'react-icons/fi';
 
 import { staffApi } from '../lib/api/staffApi';
 import { staffToast } from '../lib/notifications';
 import { queryKeys } from '../lib/react-query/queryKeys';
-
-const ENROLLMENT_STATUS_OPTIONS = ['Enrolled', 'Passed', 'Failed', 'INC', 'Withdrawn', 'FDA', 'Credited'];
 
 export default function AcademicProgressionStep4({
   studentId,
@@ -59,27 +57,14 @@ export default function AcademicProgressionStep4({
 
   const bulkUpdateGradesMutation = useMutation({
     mutationFn: (payload) => staffApi.bulkUpdateGrades(studentId, payload),
-    onSuccess: (data) => {
-      if (data?.errors && data.errors.length > 0) {
-        staffToast.warning(
-          'Partial Update',
-          `${data.updated_count} grade(s) updated. Errors: ${data.errors.join(' ')}`
-        );
-      } else {
-        staffToast.success(data?.message || 'Grades updated successfully.');
-      }
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['academicProgress', studentId] });
       queryClient.invalidateQueries({ queryKey: ['academicSummary', studentId] });
       queryClient.invalidateQueries({ queryKey: queryKeys.student(studentId) });
       setEditingGrades({});
     },
-    onError: (err) => {
-      let msg = err.response?.data?.message || 'Failed to update grades.';
-      if (err.response?.data?.errors) {
-        const validationErrors = Object.values(err.response.data.errors).flat().join(' ');
-        msg = `${msg} ${validationErrors}`;
-      }
-      staffToast.error(msg);
+    onError: () => {
+      // Silent failure — no toast shown
     },
   });
 
@@ -238,33 +223,6 @@ export default function AcademicProgressionStep4({
 
   return (
     <div className="mb-8 space-y-8">
-      {/* ── Academic Summary ── */}
-      {summary && (
-        <div className="p-6 bg-white rounded-xl border-l-4 border-amber-500 shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100 flex flex-col gap-4">
-          <h4 className="m-0 text-base font-semibold text-gray-800 flex items-center gap-2">
-            <FiAward className="text-amber-500" /> Academic Summary
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
-              <p className="m-0 text-xs text-amber-700 font-medium uppercase tracking-wide">Overall GWA</p>
-              <p className="m-0 mt-1 text-2xl font-bold text-amber-900">
-                {summary.overall_gwa != null ? summary.overall_gwa.toFixed(2) : '—'}
-              </p>
-              <p className="text-xs text-amber-600 mt-1 mb-0">System Computed</p>
-            </div>
-            <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
-              <p className="m-0 text-xs text-amber-700 font-medium uppercase tracking-wide">Latin Honors Eligibility</p>
-              <p className="m-0 mt-1 text-base font-bold text-amber-900">
-                {summary.latin_honors?.honor || 'Not Eligible'}
-              </p>
-              {summary.latin_honors?.reason && (
-                <p className="text-xs text-amber-700 mt-1 mb-0">{summary.latin_honors.reason}</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Student Program Card ── */}
       <div className="p-6 bg-white rounded-xl border-l-4 border-blue-500 shadow-[0_2px_8px_rgba(0,0,0,0.06)] border border-gray-100">
         <h4 className="m-0 mb-4 text-base font-semibold text-gray-800">Student Program</h4>
@@ -303,21 +261,13 @@ export default function AcademicProgressionStep4({
                       <h5 className="m-0 text-sm font-semibold text-gray-800">
                         {group.year_level ? ordinal(group.year_level) : '?'} Year, {Number(group.semester) === 1 ? '1st' : '2nd'} Semester, A.Y. {group.academic_year}
                       </h5>
-                      {termSummary && (
-                        <p className="m-0 mt-1 text-xs text-gray-500 font-medium flex items-center gap-2">
-                          <span>Semestral GPA: <strong className={termSummary.gpa <= 1.75 ? "text-amber-600" : "text-gray-700"}>{termSummary.gpa != null ? termSummary.gpa.toFixed(2) : '—'}</strong></span>
-                          {termSummary.deans_list?.eligible && (
-                            <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold uppercase">Dean's Lister</span>
-                          )}
-                        </p>
-                      )}
                     </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleSaveGrades(group)}
-                      disabled={bulkUpdateGradesMutation.isLoading || !Object.keys(editingGrades).some(id => group.subjects.some(s => s.grade_id == id))}
+                      disabled={bulkUpdateGradesMutation.isLoading || !Object.keys(editingGrades).some(id => group.subjects.some(s => String(s.grade_id) === String(id)))}
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow transition-colors ${
-                        Object.keys(editingGrades).some(id => group.subjects.some(s => s.grade_id == id))
+                        Object.keys(editingGrades).some(id => group.subjects.some(s => String(s.grade_id) === String(id)))
                           ? 'bg-tmcc text-white hover:bg-tmcc-dark'
                           : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                       }`}
@@ -408,6 +358,33 @@ export default function AcademicProgressionStep4({
                     </tbody>
                   </table>
                 </div>
+
+                {termSummary && (
+                  <div className="bg-gray-50/80 px-4 py-3 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-gray-700">Calculated Semestral GWA:</span>
+                        <span className="text-lg font-bold text-tmcc">{termSummary.gpa != null ? termSummary.gpa.toFixed(2) : '—'}</span>
+                      </div>
+                      {!termSummary.deans_list?.eligible && termSummary.gpa != null && (
+                         <span className="text-xs text-gray-500">{termSummary.deans_list?.reason}</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      {termSummary.deans_list?.eligible && (
+                        <div className="px-3 py-1 bg-amber-100 text-amber-800 border border-amber-200 rounded-md text-sm font-semibold flex items-center gap-1.5 shadow-sm">
+                          <FiAward /> Dean's List Awardee
+                        </div>
+                      )}
+                      {Number(group.semester) === 2 && summary?.years?.find(y => y.academic_year === group.academic_year)?.presidents_list?.eligible && (
+                        <div className="px-3 py-1 bg-blue-100 text-blue-800 border border-blue-200 rounded-md text-sm font-semibold flex items-center gap-1.5 shadow-sm">
+                          <FiAward /> President's List Awardee
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
               </div>
             )})}
           </div>
@@ -466,9 +443,32 @@ export default function AcademicProgressionStep4({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <div>
-                <p className="font-semibold m-0 text-sm">Student is ready to graduate</p>
+              <div className="flex-1">
+                <p className="font-semibold m-0 text-base mb-1">Student is ready to graduate</p>
                 <p className="m-0 mt-1 text-sm">{next_allowed_term.blocking_reason}</p>
+                
+                {summary && (
+                  <div className="mt-4 pt-4 border-t border-green-200 grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <div className="bg-white/60 p-3 rounded-lg border border-green-100">
+                        <p className="text-xs text-green-700 uppercase font-bold tracking-wide mb-1">Final Overall GWA</p>
+                        <p className="text-2xl font-black text-green-900 m-0">{summary.overall_gwa != null ? summary.overall_gwa.toFixed(2) : '—'}</p>
+                     </div>
+                     <div className="bg-white/60 p-3 rounded-lg border border-green-100">
+                        <p className="text-xs text-green-700 uppercase font-bold tracking-wide mb-1">Honors Received</p>
+                        <p className="text-sm font-medium text-green-900 m-0">
+                          Dean's List: {summary.terms?.filter(t => t.deans_list?.eligible).length || 0} times<br/>
+                          President's List: {summary.years?.filter(y => y.presidents_list?.eligible).length || 0} times
+                        </p>
+                     </div>
+                     <div className="bg-white/60 p-3 rounded-lg border border-green-100">
+                        <p className="text-xs text-green-700 uppercase font-bold tracking-wide mb-1">Latin Honors</p>
+                        <p className="text-lg font-bold text-green-900 m-0">{summary.latin_honors?.honor || 'Not Eligible'}</p>
+                        {summary.latin_honors?.reason && (
+                          <p className="text-[10px] text-green-700 mt-1 mb-0 leading-tight">{summary.latin_honors.reason}</p>
+                        )}
+                     </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : (

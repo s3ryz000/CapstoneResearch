@@ -21,6 +21,9 @@ class RecordRequest extends Model
     protected $fillable = [
         'student_id',
         'record_type',
+        'academic_year',
+        'semester',
+        'award_name',
         'purpose',
         'copies',
         'status',

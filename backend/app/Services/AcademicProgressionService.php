@@ -44,17 +44,17 @@ class AcademicProgressionService
      * Grade value to remarks mapping.
      */
     const GRADE_REMARKS = [
-        1.00 => 'Excellent',
-        1.25 => 'Superior',
-        1.50 => 'Superior',
-        1.75 => 'Very Good',
-        2.00 => 'Good',
-        2.25 => 'Good',
-        2.50 => 'Fair',
-        2.75 => 'Fair',
-        3.00 => 'Passed',
-        4.00 => 'INC',
-        5.00 => 'Failed',
+        '1.00' => 'Excellent',
+        '1.25' => 'Superior',
+        '1.50' => 'Superior',
+        '1.75' => 'Very Good',
+        '2.00' => 'Good',
+        '2.25' => 'Good',
+        '2.50' => 'Fair',
+        '2.75' => 'Fair',
+        '3.00' => 'Passed',
+        '4.00' => 'INC',
+        '5.00' => 'Failed',
     ];
 
     /**
@@ -1020,6 +1020,159 @@ class AcademicProgressionService
         }
 
         return 'Enrolled';
+    }
+
+    /**
+     * Get the full curriculum roadmap for the student dashboard.
+     * Computes statuses for all subjects across all 4 years.
+     */
+    public function getCurriculumRoadmap(Student $student): array
+    {
+        $roadmap = [];
+        $totalCurriculumUnits = 0;
+        $completedUnits = 0;
+        $failedSubjectsCount = 0;
+
+        if (!$student->program_id) {
+            return [
+                'roadmap' => [],
+                'total_curriculum_units' => 0,
+                'completed_units' => 0,
+                'units_left' => 0,
+                'failed_subjects_count' => 0
+            ];
+        }
+
+        $curriculum = Curriculum::with(['subject', 'prerequisites', 'prerequisite'])
+            ->where('program_id', $student->program_id)
+            ->orderBy('year_level')
+            ->orderBy('semester')
+            ->get();
+
+        $enrollments = Enrollment::where('student_id', $student->student_id)
+            ->whereNull('deleted_at')
+            ->whereNotIn('status', ['archived', 'Cancelled'])
+            ->get()
+            ->groupBy('subject_id');
+
+        $grades = Grade::where('student_id', $student->student_id)
+            ->get()
+            ->groupBy('subject_id');
+
+        $passedSubjectIds = collect($this->getPassedSubjectIds($student));
+
+        foreach ($curriculum as $item) {
+            $subjectId = $item->subject_id;
+            $subject = $item->subject;
+            if (!$subject) continue;
+
+            $totalCurriculumUnits += $subject->units;
+
+            $subjectEnrollments = $enrollments->get($subjectId, collect());
+            $subjectGrades = $grades->get($subjectId, collect());
+
+            $status = 'Not Yet Taken';
+            $gradeValue = null;
+            $remarks = null;
+            $enrollmentAy = null;
+            $enrollmentSem = null;
+
+            $prereqSubjects = $item->prerequisites;
+            if ($prereqSubjects->isEmpty() && ($item->getAttributes()['prerequisite'] ?? null)) {
+                $legacyId = $item->getAttributes()['prerequisite'];
+                $legacySub = Subject::find($legacyId);
+                if ($legacySub) $prereqSubjects = collect([$legacySub]);
+            }
+
+            $prereqCodes = [];
+            if ($prereqSubjects->isNotEmpty()) {
+                foreach ($prereqSubjects as $ps) {
+                    $prereqCodes[] = $ps->code;
+                }
+            }
+            if (!empty($item->unresolved_prerequisites)) {
+                $prereqCodes = array_merge($prereqCodes, $item->unresolved_prerequisites);
+            }
+
+            if ($subjectGrades->isNotEmpty() || $subjectEnrollments->isNotEmpty()) {
+                $latestGrade = $subjectGrades->sortByDesc('created_at')->first();
+                $latestEnrollment = $subjectEnrollments->sortByDesc('created_at')->first();
+
+                if ($latestGrade) {
+                    $gradeValue = $latestGrade->grade_value;
+                    $remarks = $latestGrade->remarks;
+                    $enrollmentAy = $latestGrade->academic_year;
+                    $enrollmentSem = $latestGrade->semester;
+
+                    if (in_array($latestGrade->status, self::PASSED_STATUSES) || in_array(strtoupper($latestGrade->remarks ?? ''), ['PASSED'])) {
+                        $status = 'Completed';
+                        $completedUnits += $subject->units;
+                    } elseif (in_array($latestGrade->status, self::RETAKE_STATUSES) || in_array(strtoupper($latestGrade->remarks ?? ''), ['FAILED', 'WITHDRAWN', 'FDA'])) {
+                        $status = 'Failed - Retake Required';
+                        $failedSubjectsCount++;
+                    } elseif ($latestGrade->status === 'INC' || strtoupper($latestGrade->remarks ?? '') === 'INC') {
+                        $status = 'Incomplete';
+                    } else {
+                        $status = $latestGrade->status ?? 'Unknown';
+                    }
+                } elseif ($latestEnrollment) {
+                    if ($latestEnrollment->status === 'Enrolled') {
+                        $status = 'Currently Enrolled';
+                    } else {
+                        $status = $latestEnrollment->status;
+                    }
+                    $enrollmentAy = $latestEnrollment->academic_year;
+                    $enrollmentSem = $latestEnrollment->semester;
+                }
+            } else {
+                $isBlocked = false;
+                if (!empty($item->unresolved_prerequisites)) {
+                    $isBlocked = true;
+                } elseif ($prereqSubjects->isNotEmpty()) {
+                    $reqPrereqIds = $prereqSubjects->pluck('id')->toArray();
+                    $prereqLogic = $item->prerequisite_logic ?? 'AND';
+
+                    if ($prereqLogic === 'OR') {
+                        $passedPrereqs = array_intersect($reqPrereqIds, $passedSubjectIds->toArray());
+                        $missingIds = empty($passedPrereqs) ? $reqPrereqIds : [];
+                    } else {
+                        $missingIds = array_diff($reqPrereqIds, $passedSubjectIds->toArray());
+                    }
+
+                    if (!empty($missingIds)) {
+                        $isBlocked = true;
+                    }
+                }
+
+                if ($isBlocked) {
+                    $status = 'Blocked - Missing Prerequisite';
+                } else {
+                    $status = 'Eligible to Take';
+                }
+            }
+
+            $roadmap[] = [
+                'curriculum_year_level' => $item->year_level,
+                'curriculum_semester' => $item->semester,
+                'subject_code' => $subject->code,
+                'subject_description' => $subject->title,
+                'units' => $subject->units,
+                'prerequisites' => implode(', ', array_unique($prereqCodes)),
+                'grade' => $gradeValue,
+                'status' => $status,
+                'remarks' => $remarks,
+                'academic_year' => $enrollmentAy,
+                'semester' => $enrollmentSem,
+            ];
+        }
+
+        return [
+            'roadmap' => $roadmap,
+            'total_curriculum_units' => $totalCurriculumUnits,
+            'completed_units' => $completedUnits,
+            'units_left' => max(0, $totalCurriculumUnits - $completedUnits),
+            'failed_subjects_count' => $failedSubjectsCount
+        ];
     }
 
     // ── Private helpers ─────────────────────────────────────────────────

@@ -293,8 +293,8 @@ const StaffPendingRequestsPage = () => {
   const pendingRecordTypes = useMemo(() => [...new Set(pendingRequests.map((r) => r.record_type))], [pendingRequests]);
   const monthCells = useMemo(() => buildMonthCells(approveMonth), [approveMonth]);
   const selectedDateTaken = slotsPayload.taken_by_date?.[appointmentDate] || [];
-  const now = new Date();
   const selectedDateObj = appointmentDate ? new Date(`${appointmentDate}T00:00:00`) : null;
+  const now = useMemo(() => new Date(), []);
   const isSelectedToday = selectedDateObj ? isSameDate(selectedDateObj, now) : false;
   const disabledPastSlots = useMemo(() => {
     if (!isSelectedToday) return new Set();
@@ -431,6 +431,7 @@ const StaffPendingRequestsPage = () => {
                     <SortableTh label="Student Name" sortKey="student_name" currentSortKey={pendingSortKey} currentSortDir={pendingSortDir} onToggle={togglePendingSort} />
                     <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Student No.</th>
                     <SortableTh label="Document Type" sortKey="record_type" currentSortKey={pendingSortKey} currentSortDir={pendingSortDir} onToggle={togglePendingSort} />
+                    <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Details</th>
                     <SortableTh label="Purpose" sortKey="purpose" currentSortKey={pendingSortKey} currentSortDir={pendingSortDir} onToggle={togglePendingSort} />
                     <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Copies</th>
                     <SortableTh label="Date Submitted" sortKey="requested_at" currentSortKey={pendingSortKey} currentSortDir={pendingSortDir} onToggle={togglePendingSort} />
@@ -446,10 +447,17 @@ const StaffPendingRequestsPage = () => {
                         <td className="py-3 px-4 text-gray-500 text-xs font-mono">#{req.id}</td>
                         <td className="py-3 px-4 text-gray-800">{req.student_name}</td>
                         <td className="py-3 px-4 text-gray-700 text-xs">{req.student?.student_number ?? '—'}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.record_type}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.purpose}</td>
-                        <td className="py-3 px-4 text-gray-700 text-center">{req.copies ?? 1}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.requested_at}</td>
+                        <td className="py-3 px-4 text-gray-700 capitalize text-xs">
+                          {req.record_type.replace(/_/g, ' ')}
+                          {req.award_name && <div className="text-[10px] text-blue-600 font-semibold mt-1">{req.award_name}</div>}
+                        </td>
+                        <td className="py-3 px-4 text-gray-600 text-xs">
+                          {req.academic_year ? `AY ${req.academic_year}` : '—'}<br/>
+                          {req.semester ? `Sem ${req.semester}` : ''}
+                        </td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.purpose || '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 text-center text-xs">{req.copies ?? 1}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.requested_at}</td>
                         <td className="py-3 px-4">
                           <div className="flex gap-2 flex-wrap">
                             <button type="button" className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-sm bg-tmcc text-white hover:bg-tmcc-dark focus:ring-2 focus:ring-tmcc/30" onClick={() => handleApprove(req.id)}><FiCheck /> Approve</button>
@@ -505,6 +513,7 @@ const StaffPendingRequestsPage = () => {
                   <tr>
                     <SortableTh label="Student Name" sortKey="student_name" currentSortKey={approvedSortKey} currentSortDir={approvedSortDir} onToggle={toggleApprovedSort} />
                     <SortableTh label="Record Type" sortKey="record_type" currentSortKey={approvedSortKey} currentSortDir={approvedSortDir} onToggle={toggleApprovedSort} />
+                    <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Details</th>
                     <SortableTh label="Purpose" sortKey="purpose" currentSortKey={approvedSortKey} currentSortDir={approvedSortDir} onToggle={toggleApprovedSort} />
                     <SortableTh label="Requested" sortKey="requested_at" currentSortKey={approvedSortKey} currentSortDir={approvedSortDir} onToggle={toggleApprovedSort} />
                     <SortableTh label="Processed" sortKey="processed_at" currentSortKey={approvedSortKey} currentSortDir={approvedSortDir} onToggle={toggleApprovedSort} />
@@ -521,11 +530,18 @@ const StaffPendingRequestsPage = () => {
                     approvedSorted.map((req) => (
                       <tr key={req.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                         <td className="py-3 px-4 text-gray-800">{req.student_name}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.record_type}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.purpose}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.requested_at}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.processed_at ?? '—'}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.appointment_at ?? '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 capitalize text-xs">
+                          {req.record_type.replace(/_/g, ' ')}
+                          {req.award_name && <div className="text-[10px] text-blue-600 font-semibold mt-1">{req.award_name}</div>}
+                        </td>
+                        <td className="py-3 px-4 text-gray-600 text-xs">
+                          {req.academic_year ? `AY ${req.academic_year}` : '—'}<br/>
+                          {req.semester ? `Sem ${req.semester}` : ''}
+                        </td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.purpose || '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.requested_at}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.processed_at ?? '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.appointment_at ?? '—'}</td>
                         <td className="py-3 px-4">
                           <button
                             type="button"
@@ -561,6 +577,7 @@ const StaffPendingRequestsPage = () => {
                   <tr>
                     <SortableTh label="Student Name" sortKey="student_name" currentSortKey={rejectedSortKey} currentSortDir={rejectedSortDir} onToggle={toggleRejectedSort} />
                     <SortableTh label="Record Type" sortKey="record_type" currentSortKey={rejectedSortKey} currentSortDir={rejectedSortDir} onToggle={toggleRejectedSort} />
+                    <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Details</th>
                     <SortableTh label="Purpose" sortKey="purpose" currentSortKey={rejectedSortKey} currentSortDir={rejectedSortDir} onToggle={toggleRejectedSort} />
                     <SortableTh label="Requested" sortKey="requested_at" currentSortKey={rejectedSortKey} currentSortDir={rejectedSortDir} onToggle={toggleRejectedSort} />
                     <SortableTh label="Processed" sortKey="processed_at" currentSortKey={rejectedSortKey} currentSortDir={rejectedSortDir} onToggle={toggleRejectedSort} />
@@ -576,11 +593,18 @@ const StaffPendingRequestsPage = () => {
                     rejectedSorted.map((req) => (
                       <tr key={req.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                         <td className="py-3 px-4 text-gray-800">{req.student_name}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.record_type}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.purpose}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.requested_at}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.processed_at ?? '—'}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.rejection_reason ?? '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 capitalize text-xs">
+                          {req.record_type.replace(/_/g, ' ')}
+                          {req.award_name && <div className="text-[10px] text-blue-600 font-semibold mt-1">{req.award_name}</div>}
+                        </td>
+                        <td className="py-3 px-4 text-gray-600 text-xs">
+                          {req.academic_year ? `AY ${req.academic_year}` : '—'}<br/>
+                          {req.semester ? `Sem ${req.semester}` : ''}
+                        </td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.purpose || '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.requested_at}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.processed_at ?? '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.rejection_reason ?? '—'}</td>
                       </tr>
                     ))
                   )}

@@ -237,7 +237,20 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+
+    if (name === 'enrollment_date') {
+      setForm((prev) => {
+        const newForm = { ...prev, enrollment_date: value };
+        if (newForm.graduation_date && value > newForm.graduation_date) {
+          newForm.graduation_date = '';
+          staffToast.warning('Date conflict resolved', 'Graduation date cleared because it cannot be earlier than the new enrollment date.');
+        }
+        return newForm;
+      });
+    } else {
+      setForm((prev) => ({ ...prev, [name]: value }));
+    }
+
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: null }));
     if (submitStatus) setSubmitStatus(null);
   };
@@ -258,9 +271,17 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
         err.email = "Enter a valid email.";
     }
     if (phase === 3) {
-      if (!form.enrollment_date)
+      if (!form.enrollment_date) {
         err.enrollment_date = "Enrollment date is required.";
-
+      } else {
+        const today = new Date().toISOString().slice(0, 10);
+        if (form.enrollment_date > today) {
+          err.enrollment_date = "Enrollment date cannot be later than today.";
+        }
+      }
+      if (form.graduation_date && form.enrollment_date && form.graduation_date < form.enrollment_date) {
+        err.graduation_date = "Graduation date cannot be earlier than enrollment date.";
+      }
     }
     setErrors(err);
     return Object.keys(err).length === 0;
@@ -277,9 +298,17 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
     if (!form.email?.trim()) err.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
       err.email = "Enter a valid email.";
-    if (!form.enrollment_date)
+    if (!form.enrollment_date) {
       err.enrollment_date = "Enrollment date is required.";
-
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      if (form.enrollment_date > today) {
+        err.enrollment_date = "Enrollment date cannot be later than today.";
+      }
+    }
+    if (form.graduation_date && form.enrollment_date && form.graduation_date < form.enrollment_date) {
+      err.graduation_date = "Graduation date cannot be earlier than enrollment date.";
+    }
     setErrors(err);
     return Object.keys(err).length === 0;
   };
@@ -957,6 +986,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                       type="date"
                       value={form.enrollment_date}
                       onChange={handleChange}
+                      max={new Date().toISOString().slice(0, 10)}
                       className={`${inputBase} ${errors.enrollment_date ? inputError : inputNormal}`}
                       aria-invalid={!!errors.enrollment_date}
                     />
@@ -979,6 +1009,7 @@ const StaffEditStudentPage = ({ basePath = "/staff" }) => {
                       type="date"
                       value={form.graduation_date}
                       onChange={handleChange}
+                      min={form.enrollment_date || ''}
                       className={`${inputBase} ${inputNormal}`}
                     />
                   </div>

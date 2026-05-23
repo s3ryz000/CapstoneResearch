@@ -4,6 +4,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { staffToast } from '../lib/notifications';
 import { staffApi } from '../lib/api/staffApi';
 import { parseApiError } from '../lib/api/errors';
+import jsPDF from 'jspdf';
 
 const ENTRIES_OPTIONS = [5, 10, 25, 50];
 
@@ -71,7 +72,12 @@ const StaffDocumentReleasePage = () => {
       setReleasedRequests(releasedList.map((r) => ({
         id: r.id,
         student_name: r.student_name ?? (r.student ? [r.student.first_name, r.student.last_name].filter(Boolean).join(' ') : '—'),
+        student_number: r.student?.student_number,
+        program_name: r.student?.program?.name,
         record_type: r.record_type ?? '—',
+        academic_year: r.academic_year,
+        semester: r.semester,
+        award_name: r.award_name,
         purpose: r.purpose ?? '—',
         released_at: r.released_at,
         requested_at: r.requested_at,
@@ -223,6 +229,47 @@ const StaffDocumentReleasePage = () => {
       return;
     }
 
+    if (String(row.record_type || '').includes('certificate')) {
+      const doc = new jsPDF();
+      
+      doc.setFontSize(16);
+      doc.setFont('times', 'bold');
+      doc.text('Trece Martires City College', 105, 30, { align: 'center' });
+      
+      doc.setFontSize(12);
+      doc.setFont('times', 'normal');
+      doc.text('Automated Student Records Management System', 105, 40, { align: 'center' });
+
+      doc.setFontSize(14);
+      doc.setFont('times', 'bold');
+      doc.text('CERTIFICATE OF ELIGIBILITY', 105, 60, { align: 'center' });
+
+      doc.setFontSize(12);
+      doc.setFont('times', 'normal');
+      
+      const studentName = row.student_name || 'N/A';
+      const studentId = row.student_number || 'N/A';
+      const programName = row.program_name || 'N/A';
+      const awardName = row.award_name || row.record_type.replace(/_/g, ' ');
+      const ay = row.academic_year || 'Overall';
+      const sem = row.semester || '';
+      
+      let text = `This certifies that ${studentName}, ${studentId}, from ${programName}, is eligible for ${awardName} for ${ay}`;
+      if (sem && sem !== 'All' && sem !== 'Graduation') {
+        text += ` ${sem}`;
+      }
+      text += `, based on computed academic records in the Automated Student Records Management System.`;
+
+      const splitText = doc.splitTextToSize(text, 170);
+      doc.text(splitText, 20, 80);
+
+      doc.text(`Date Generated: ${new Date().toLocaleDateString()}`, 20, 120);
+      doc.text(`Status: Released (${formatDateTime(row.released_at)})`, 20, 130);
+
+      doc.save(`${awardName.replace(/\s+/g, '_')}_${studentId}.pdf`);
+      return;
+    }
+
     const printWindow = window.open('', '_blank', 'width=900,height=700');
     if (!printWindow) {
       staffToast.error('Print blocked', 'Please allow pop-ups in your browser to print the release slip.');
@@ -354,6 +401,7 @@ const StaffDocumentReleasePage = () => {
               <tr>
                 <SortableTh label="Student Name" sortKey="student_name" />
                 <SortableTh label="Record Type" sortKey="record_type" />
+                <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Details</th>
                 <SortableTh label="Purpose" sortKey="purpose" />
                 <SortableTh label="Approved" sortKey="approved_at" />
                 <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Actions</th>
@@ -366,9 +414,16 @@ const StaffDocumentReleasePage = () => {
                 releasePaginated.map((req) => (
                   <tr key={req.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                     <td className="py-3 px-4 text-gray-800">{req.student_name}</td>
-                    <td className="py-3 px-4 text-gray-700">{req.record_type}</td>
-                    <td className="py-3 px-4 text-gray-700">{req.purpose}</td>
-                    <td className="py-3 px-4 text-gray-700">{req.approved_at}</td>
+                    <td className="py-3 px-4 text-gray-700 capitalize text-xs">
+                      {req.record_type.replace(/_/g, ' ')}
+                      {req.award_name && <div className="text-[10px] text-blue-600 font-semibold mt-1">{req.award_name}</div>}
+                    </td>
+                    <td className="py-3 px-4 text-gray-600 text-xs">
+                      {req.academic_year ? `AY ${req.academic_year}` : '—'}<br/>
+                      {req.semester ? `Sem ${req.semester}` : ''}
+                    </td>
+                    <td className="py-3 px-4 text-gray-700 text-xs">{req.purpose || '—'}</td>
+                    <td className="py-3 px-4 text-gray-700 text-xs">{req.approved_at}</td>
                     <td className="py-3 px-4">
                       <button
                         type="button"
@@ -441,6 +496,7 @@ const StaffDocumentReleasePage = () => {
                   <tr>
                     <ReleasedSortableTh label="Student Name" sortKey="student_name" />
                     <ReleasedSortableTh label="Record Type" sortKey="record_type" />
+                    <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Details</th>
                     <ReleasedSortableTh label="Purpose" sortKey="purpose" />
                     <ReleasedSortableTh label="Released At" sortKey="released_at" />
                     <th className="py-3 px-4 text-left border-b-2 border-gray-200 bg-gray-100 font-semibold text-gray-700">Actions</th>
@@ -453,9 +509,16 @@ const StaffDocumentReleasePage = () => {
                     releasedPaginated.map((req) => (
                       <tr key={req.id} className="border-b border-gray-100 hover:bg-gray-50/80">
                         <td className="py-3 px-4 text-gray-800">{req.student_name}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.record_type}</td>
-                        <td className="py-3 px-4 text-gray-700">{req.purpose}</td>
-                        <td className="py-3 px-4 text-gray-700">{formatDateTime(req.released_at)}</td>
+                        <td className="py-3 px-4 text-gray-700 capitalize text-xs">
+                          {req.record_type.replace(/_/g, ' ')}
+                          {req.award_name && <div className="text-[10px] text-blue-600 font-semibold mt-1">{req.award_name}</div>}
+                        </td>
+                        <td className="py-3 px-4 text-gray-600 text-xs">
+                          {req.academic_year ? `AY ${req.academic_year}` : '—'}<br/>
+                          {req.semester ? `Sem ${req.semester}` : ''}
+                        </td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{req.purpose || '—'}</td>
+                        <td className="py-3 px-4 text-gray-700 text-xs">{formatDateTime(req.released_at)}</td>
                         <td className="py-3 px-4">
                           <button
                             type="button"

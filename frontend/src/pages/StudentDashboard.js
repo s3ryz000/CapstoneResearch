@@ -1,26 +1,31 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   FiInfo,
   FiFileText,
+  FiAward,
+  FiAlertCircle,
+  FiCheckCircle,
+  FiPieChart,
+  FiTrendingUp,
+  FiBookOpen,
   FiLayers,
-  FiClipboard,
-  FiPrinter,
 } from 'react-icons/fi';
-import RequestRecordModal from '../components/student/RequestRecordModal';
-import SubjectsModal from '../components/student/SubjectsModal';
-import GradesModal from '../components/student/GradesModal';
-import ViewCopyOfGradesModal from '../components/student/ViewCopyOfGradesModal';
 import { studentApi } from '../lib/api/studentApi';
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
-  const [profile, setProfile] = useState(null);
-  const [modalOpen, setModalOpen] = useState({ requestRecord: false, subjects: false, grades: false, viewCopyOfGrades: false });
 
-  React.useEffect(() => {
-    studentApi.getProfile().then(setProfile).catch(() => setProfile(null));
-  }, []);
+  const { data: profile } = useQuery({
+    queryKey: ['studentProfile'],
+    queryFn: studentApi.getProfile,
+  });
+
+  const { data: academicSummary } = useQuery({
+    queryKey: ['studentAcademicSummary'],
+    queryFn: studentApi.getAcademicSummary,
+  });
 
   const academicYear = profile?.academic_year || '';
   const semester = profile?.semester || '';
@@ -43,33 +48,109 @@ const StudentDashboard = () => {
     ].every(hasValue)
     : false;
 
+  const summaryData = academicSummary?.summary;
+  const curriculumData = academicSummary?.curriculum;
+  const notifications = academicSummary?.notifications || [];
+
   return (
     <>
-      {/* ========== ENROLLMENT SECTION ========== */}
       <section className="sd-content">
-        <div className="sd-enrollment-section">
+        <h2 className="sd-section-title sd-title-red" style={{ marginBottom: '1rem' }}>
+          Student Dashboard
+        </h2>
+
+        {/* ========== NOTIFICATIONS / ALERTS ========== */}
+        {notifications.length > 0 && (
+          <div className="mb-6 flex flex-col gap-3">
+            {notifications.map((note, idx) => (
+              <div 
+                key={idx} 
+                className={`p-4 rounded-md flex items-start gap-3 border ${
+                  note.type === 'success' 
+                    ? 'bg-green-50 border-green-200 text-green-800' 
+                    : note.type === 'warning'
+                    ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
+                    : 'bg-blue-50 border-blue-200 text-blue-800'
+                }`}
+              >
+                {note.type === 'success' ? <FiAward className="mt-1 flex-shrink-0" /> : <FiAlertCircle className="mt-1 flex-shrink-0" />}
+                <div>
+                  <p className="text-sm font-medium">{note.message}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ========== ACADEMIC SUMMARY CARDS ========== */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white rounded-lg shadow p-5 border border-gray-100 flex flex-col">
+            <div className="flex items-center gap-2 text-gray-500 mb-2">
+              <FiTrendingUp /> <span className="text-sm font-medium uppercase tracking-wider">Overall GWA</span>
+            </div>
+            <div className="text-3xl font-bold text-gray-800 mt-auto">
+              {summaryData?.overall_gwa ? Number(summaryData.overall_gwa).toFixed(2) : '—'}
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-lg shadow p-5 border border-gray-100 flex flex-col">
+            <div className="flex items-center gap-2 text-gray-500 mb-2">
+              <FiBookOpen /> <span className="text-sm font-medium uppercase tracking-wider">Curriculum Units</span>
+            </div>
+            <div className="text-3xl font-bold text-gray-800 mt-auto">
+              {curriculumData?.total_curriculum_units || 0}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-5 border border-gray-100 flex flex-col">
+            <div className="flex items-center gap-2 text-gray-500 mb-2">
+              <FiCheckCircle /> <span className="text-sm font-medium uppercase tracking-wider">Units Completed</span>
+            </div>
+            <div className="text-3xl font-bold text-green-600 mt-auto">
+              {curriculumData?.completed_units || 0}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-5 border border-gray-100 flex flex-col">
+            <div className="flex items-center gap-2 text-gray-500 mb-2">
+              <FiPieChart /> <span className="text-sm font-medium uppercase tracking-wider">Units Left</span>
+            </div>
+            <div className="text-3xl font-bold text-blue-600 mt-auto">
+              {curriculumData?.units_left || 0}
+            </div>
+          </div>
+        </div>
+
+        {/* ========== ENROLLMENT SECTION ========== */}
+        <div className="sd-enrollment-section mt-8">
           <h2 className="sd-section-title sd-title-red">Enrollment - {semester} {academicYear}</h2>
           <p className="sd-filter-hint">
             <FiInfo className="sd-info-icon" />
-            Use the links below to view your subjects, grades, or request academic records.
+            Access your full curriculum roadmap, grades, and academic standing below.
           </p>
 
-          <div className="sd-quick-links">
-            
-            <button type="button" className="sd-quick-link" onClick={() => setModalOpen((m) => ({ ...m, subjects: true }))}>
-              <span className="sd-quick-icon"><FiLayers /></span> Subjects
+          <div className="sd-quick-links" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            <button 
+              type="button" 
+              className="sd-quick-link" 
+              onClick={() => navigate('/dashboard/academic-records')}
+              style={{ flex: 1, minWidth: '250px', justifyContent: 'center' }}
+            >
+              <span className="sd-quick-icon"><FiLayers /></span> Academic Records
             </button>
-            <button type="button" className="sd-quick-link" onClick={() => setModalOpen((m) => ({ ...m, grades: true }))}>
-              <span className="sd-quick-icon"><FiClipboard /></span> Grades
-            </button>
-            <button type="button" className="sd-quick-link" onClick={() => setModalOpen((m) => ({ ...m, viewCopyOfGrades: true }))}>
-              <span className="sd-quick-icon"><FiPrinter /></span> View Copy of Grades
+            <button 
+              type="button" 
+              className="sd-quick-link" 
+              onClick={() => navigate('/dashboard/request')}
+              style={{ flex: 1, minWidth: '250px', justifyContent: 'center' }}
+            >
+              <span className="sd-quick-icon"><FiFileText /></span> Request Documents and Awards
             </button>
           </div>
         </div>
 
         {/* ========== RECORD UPDATE (SIS/SIUF - student records) ========== */}
-        <h2 className="sd-section-title sd-title-red">Record Update</h2>
+        <h2 className="sd-section-title sd-title-red mt-8">Record Update</h2>
         <div className="sd-cards-row">
           <button
             type="button"
@@ -103,7 +184,7 @@ const StudentDashboard = () => {
         </div>
 
         {/* ========== TRUNKLINES + LOCAL NUMBERS ========== */}
-        <div className="sd-bottom-panels">
+        <div className="sd-bottom-panels mt-8">
           <div className="sd-panel sd-panel-trunklines">
             <h3 className="sd-panel-title">Trunklines</h3>
             <div className="sd-trunkline-table">
@@ -125,15 +206,6 @@ const StudentDashboard = () => {
           </div>
         </div>
       </section>
-
-      <RequestRecordModal
-        isOpen={modalOpen.requestRecord}
-        onClose={() => setModalOpen((m) => ({ ...m, requestRecord: false }))}
-        onSuccess={() => setModalOpen((m) => ({ ...m, requestRecord: false }))}
-      />
-      <SubjectsModal isOpen={modalOpen.subjects} onClose={() => setModalOpen((m) => ({ ...m, subjects: false }))} />
-      <GradesModal isOpen={modalOpen.grades} onClose={() => setModalOpen((m) => ({ ...m, grades: false }))} />
-      <ViewCopyOfGradesModal isOpen={modalOpen.viewCopyOfGrades} onClose={() => setModalOpen((m) => ({ ...m, viewCopyOfGrades: false }))} />
     </>
   );
 };

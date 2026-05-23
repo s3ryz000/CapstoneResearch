@@ -36,7 +36,7 @@ class StoreStudentRequest extends FormRequest
             'high_school_year' => ['nullable', 'integer', 'min:1900', 'max:2100'],
             'previous_school' => ['nullable', 'string', 'max:150'],
             'previous_course' => ['nullable', 'string', 'max:150'],
-            'enrollment_date' => ['required', 'date'],
+            'enrollment_date' => ['required', 'date', 'before_or_equal:today'],
             'graduation_date' => ['nullable', 'date', 'after_or_equal:enrollment_date'],
 
             'program_id' => ['required', 'exists:programs,id'],

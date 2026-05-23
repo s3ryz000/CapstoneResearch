@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FiUser, FiMail, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload } from 'react-icons/fi';
+import { FiUser, FiMail, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload, FiSearch, FiLayers, FiFileText } from 'react-icons/fi';
+import jsPDF from 'jspdf';
 import { parseApiError } from '../lib/api/errors';
 import { staffToast } from '../lib/notifications';
 import { staffApi } from '../lib/api/staffApi';
 import { useViewRecordsStudentsListQuery } from '../hooks/useViewRecordsStudentsListQuery';
 import { useViewRecordsStudentDetailQuery } from '../hooks/useViewRecordsStudentDetailQuery';
+import { useViewRecordsAcademicSummaryQuery } from '../hooks/useViewRecordsAcademicSummaryQuery';
 import {
   VIEW_RECORDS_DEFAULT_PER_PAGE,
   VIEW_RECORDS_PER_PAGE_OPTIONS,
@@ -26,7 +28,14 @@ const ViewRecordsPage = () => {
   const [perPage, setPerPage] = useState(VIEW_RECORDS_DEFAULT_PER_PAGE);
   const [selectedId, setSelectedId] = useState(null);
   const [activeTab, setActiveTab] = useState('profile');
+  const [academicViewMode, setAcademicViewMode] = useState(null); // null, 'subjects', 'documents'
   const [transcriptDownloading, setTranscriptDownloading] = useState(false);
+
+  const [searchCode, setSearchCode] = useState('');
+  const [filterAy, setFilterAy] = useState('');
+  const [filterYr, setFilterYr] = useState('');
+  const [filterSem, setFilterSem] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), VIEW_RECORDS_SEARCH_DEBOUNCE_MS);
@@ -88,8 +97,15 @@ const ViewRecordsPage = () => {
     isLoading: detailLoading,
     isError: detailError,
     error: detailErr,
-    isFetching: detailFetching,
   } = detailQuery;
+
+
+
+  const summaryQuery = useViewRecordsAcademicSummaryQuery(selectedId);
+  const {
+    data: summaryPayload,
+    isLoading: summaryLoading,
+  } = summaryQuery;
 
   const student = detailPayload?.student ?? null;
 
@@ -130,6 +146,45 @@ const ViewRecordsPage = () => {
     }
   }, [selectedId, student]);
 
+  const generateAwardPdf = useCallback((awardName, ay, sem) => {
+    if (!student) return;
+    const doc = new jsPDF();
+    
+    doc.setFontSize(16);
+    doc.setFont('times', 'bold');
+    doc.text('Trece Martires City College', 105, 30, { align: 'center' });
+    
+    doc.setFontSize(12);
+    doc.setFont('times', 'normal');
+    doc.text('Automated Student Records Management System', 105, 40, { align: 'center' });
+
+    doc.setFontSize(14);
+    doc.setFont('times', 'bold');
+    doc.text('CERTIFICATE OF ELIGIBILITY', 105, 60, { align: 'center' });
+
+    doc.setFontSize(12);
+    doc.setFont('times', 'normal');
+    
+    const studentName = student.first_name + ' ' + student.last_name;
+    const studentId = student.student_number || student.student_id;
+    const programName = student.program?.name || 'N/A';
+    const computedGwa = summaryPayload?.summary?.overall_gwa || 'N/A';
+    
+    let text = `This certifies that ${studentName}, ${studentId}, from ${programName}, is eligible for ${awardName} for ${ay}`;
+    if (sem) {
+      text += ` ${sem}`;
+    }
+    text += `, based on computed academic records in the Automated Student Records Management System.`;
+
+    const splitText = doc.splitTextToSize(text, 170);
+    doc.text(splitText, 20, 80);
+
+    doc.text(`Computed GWA: ${Number(computedGwa).toFixed(2)}`, 20, 120);
+    doc.text(`Date Generated: ${new Date().toLocaleDateString()}`, 20, 130);
+
+    doc.save(`${awardName.replace(/\s+/g, '_')}_${studentId}.pdf`);
+  }, [student, summaryPayload]);
+
   const onSortChange = (e) => {
     const v = e.target.value;
     if (!v) return;
@@ -151,10 +206,108 @@ const ViewRecordsPage = () => {
     return 'bg-teal-100 text-teal-900';
   };
 
-  const gradeRows = useMemo(() => {
-    const grades = student?.grades;
-    return Array.isArray(grades) ? grades : [];
-  }, [student]);
+  const getSubjectStatusBadgeClass = (status) => {
+    if (status === 'Completed') return 'bg-green-100 text-green-800';
+    if (status === 'Currently Enrolled') return 'bg-blue-100 text-blue-800';
+    if (status === 'Failed - Retake Required') return 'bg-red-100 text-red-800';
+    if (status === 'Incomplete') return 'bg-orange-100 text-orange-800';
+    if (status?.includes('Blocked')) return 'bg-gray-100 text-gray-800';
+    return 'bg-gray-50 text-gray-600';
+  };
+
+  const filteredRoadmap = useMemo(() => {
+    const roadmap = summaryPayload?.curriculum?.roadmap || [];
+    return roadmap.filter((item) => {
+      const matchSearch =
+        item.subject_code.toLowerCase().includes(searchCode.toLowerCase()) ||
+        item.subject_description.toLowerCase().includes(searchCode.toLowerCase());
+      const matchAy = filterAy ? item.academic_year === filterAy : true;
+      const matchYr = filterYr ? String(item.curriculum_year_level) === filterYr : true;
+      const matchSem = filterSem ? String(item.curriculum_semester) === filterSem : true;
+      let matchStatus = true;
+      if (filterStatus) {
+        if (filterStatus === 'Completed') matchStatus = item.status === 'Completed';
+        else if (filterStatus === 'Enrolled') matchStatus = item.status === 'Currently Enrolled';
+        else if (filterStatus === 'Failed') matchStatus = item.status === 'Failed - Retake Required';
+        else if (filterStatus === 'Blocked') matchStatus = item.status.includes('Blocked');
+        else if (filterStatus === 'Eligible') matchStatus = item.status === 'Eligible to Take' || item.status === 'Not Yet Taken';
+      }
+      return matchSearch && matchAy && matchYr && matchSem && matchStatus;
+    });
+  }, [summaryPayload, searchCode, filterAy, filterYr, filterSem, filterStatus]);
+
+  const documentsList = useMemo(() => {
+    if (!summaryPayload) return [];
+    const list = [];
+    
+    // Transcript is always available
+    list.push({
+      ay: 'All',
+      sem: 'All',
+      type: 'Academic Record',
+      name: 'Transcript of Records',
+      status: 'Available',
+      actionType: 'transcript'
+    });
+
+    // Certificate of Grades
+    list.push({
+      ay: 'All',
+      sem: 'All',
+      type: 'Academic Record',
+      name: 'Certificate of Grades',
+      status: 'Available',
+      actionType: 'cog'
+    });
+
+    const summary = summaryPayload.summary;
+    if (summary) {
+      // Latin Honors
+      if (summary.latin_honors?.eligible) {
+        list.push({
+          ay: 'Overall',
+          sem: 'Graduation',
+          type: 'Latin Honor',
+          name: summary.latin_honors.honor,
+          status: 'Eligible',
+          actionType: 'latin_honor'
+        });
+      }
+
+      // Presidents List
+      if (summary.years) {
+        summary.years.forEach(yr => {
+          if (yr.presidents_list?.eligible) {
+            list.push({
+              ay: yr.academic_year,
+              sem: 'All',
+              type: 'Academic Award',
+              name: 'President\'s List',
+              status: 'Eligible',
+              actionType: 'presidents_list'
+            });
+          }
+        });
+      }
+
+      // Deans List
+      if (summary.terms) {
+        summary.terms.forEach(term => {
+          if (term.deans_list?.eligible) {
+            list.push({
+              ay: term.academic_year,
+              sem: term.semester,
+              type: 'Academic Award',
+              name: 'Dean\'s List',
+              status: 'Eligible',
+              actionType: 'deans_list'
+            });
+          }
+        });
+      }
+    }
+    return list;
+  }, [summaryPayload]);
 
   return (
     <div className="space-y-5">
@@ -313,16 +466,6 @@ const ViewRecordsPage = () => {
                   <h3 className="m-0 text-lg font-semibold text-tmcc flex-1 min-w-0 pr-2">
                     {selectedRow ? selectedRow.displayName : '…'}
                   </h3>
-                  <button
-                    type="button"
-                    onClick={handleDownloadTranscript}
-                    disabled={!student || detailLoading || transcriptDownloading}
-                    className="inline-flex items-center gap-2 shrink-0 py-2 px-3 rounded-lg text-sm font-medium bg-tmcc text-white hover:bg-tmcc-dark disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                    aria-label="Download official transcript"
-                  >
-                    <FiDownload className="w-4 h-4 shrink-0" aria-hidden />
-                    {transcriptDownloading ? 'Preparing…' : 'Download transcript'}
-                  </button>
                 </div>
                 <div className="flex gap-6 border-b border-transparent">
                   <button
@@ -452,45 +595,182 @@ const ViewRecordsPage = () => {
                 )}
 
                 {student && activeTab === 'academic' && (
-                  <div className="overflow-x-auto">
-                    {detailFetching && !detailLoading && (
-                      <p className="text-xs text-gray-400 mb-2">Refreshing grades…</p>
+                  <div className="space-y-6">
+                    {/* View Options */}
+                    {!academicViewMode && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                        <button
+                          onClick={() => setAcademicViewMode('subjects')}
+                          className="flex flex-col items-center justify-center p-8 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-colors shadow-sm"
+                        >
+                          <FiLayers className="w-8 h-8 text-blue-500 mb-3" />
+                          <span className="text-lg font-semibold text-gray-800">View Subjects and Grades</span>
+                          <span className="text-sm text-gray-500 mt-1">Review the full curriculum roadmap and academic standing</span>
+                        </button>
+                        
+                        <button
+                          onClick={() => setAcademicViewMode('documents')}
+                          className="flex flex-col items-center justify-center p-8 bg-white border border-gray-200 rounded-xl hover:border-green-300 hover:bg-green-50 transition-colors shadow-sm"
+                        >
+                          <FiFileText className="w-8 h-8 text-green-500 mb-3" />
+                          <span className="text-lg font-semibold text-gray-800">Download Documents and Awards</span>
+                          <span className="text-sm text-gray-500 mt-1">Generate transcripts and honor certificates</span>
+                        </button>
+                      </div>
                     )}
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-200">
-                          <th className="text-left py-3 px-3 font-semibold text-gray-700">Subject</th>
-                          <th className="text-left py-3 px-3 font-semibold text-gray-700">A.Y.</th>
-                          <th className="text-left py-3 px-3 font-semibold text-gray-700">Semester</th>
-                          <th className="text-left py-3 px-3 font-semibold text-gray-700">Grade</th>
-                          <th className="text-left py-3 px-3 font-semibold text-gray-700">Remarks</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {gradeRows.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="py-8 px-3 text-center text-gray-500 italic">
-                              No grades on file.
-                            </td>
-                          </tr>
-                        ) : (
-                          gradeRows.map((g) => (
-                            <tr key={g.id} className="border-b border-gray-100 hover:bg-gray-50/80">
-                              <td className="py-2.5 px-3 text-gray-900">
-                                {g.subject?.code ? `${g.subject.code} — ` : ''}
-                                {g.subject?.title ?? '—'}
-                              </td>
-                              <td className="py-2.5 px-3 text-gray-700">{g.academic_year ?? '—'}</td>
-                              <td className="py-2.5 px-3 text-gray-700">{g.semester ?? '—'}</td>
-                              <td className="py-2.5 px-3 font-medium text-gray-900">
-                                {g.grade_value != null ? Number(g.grade_value).toFixed(2) : '—'}
-                              </td>
-                              <td className="py-2.5 px-3 text-gray-600">{g.remarks ?? '—'}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+
+                    {/* Subjects and Grades View */}
+                    {academicViewMode === 'subjects' && (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 mb-4">
+                          <button onClick={() => setAcademicViewMode(null)} className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1">
+                            <FiChevronLeft /> Back to options
+                          </button>
+                        </div>
+
+                        <div className="p-4 border border-gray-200 bg-gray-50 rounded-lg flex flex-wrap gap-4 items-center">
+                          <div className="flex-1 min-w-[200px] relative">
+                            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="text"
+                              placeholder="Search code or description..."
+                              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm"
+                              value={searchCode}
+                              onChange={(e) => setSearchCode(e.target.value)}
+                            />
+                          </div>
+                          
+                          <select className="border border-gray-300 rounded-md px-3 py-2 bg-white text-sm" value={filterAy} onChange={(e) => setFilterAy(e.target.value)}>
+                            <option value="">All Academic Years</option>
+                            {Array.from(new Set(summaryPayload?.curriculum?.roadmap?.map(r => r.academic_year).filter(Boolean))).map(ay => (
+                              <option key={ay} value={ay}>{ay}</option>
+                            ))}
+                          </select>
+                          <select className="border border-gray-300 rounded-md px-3 py-2 bg-white text-sm" value={filterYr} onChange={(e) => setFilterYr(e.target.value)}>
+                            <option value="">All Years</option>
+                            <option value="1">1st Year</option>
+                            <option value="2">2nd Year</option>
+                            <option value="3">3rd Year</option>
+                            <option value="4">4th Year</option>
+                          </select>
+                          <select className="border border-gray-300 rounded-md px-3 py-2 bg-white text-sm" value={filterSem} onChange={(e) => setFilterSem(e.target.value)}>
+                            <option value="">All Semesters</option>
+                            <option value="1">1st Semester</option>
+                            <option value="2">2nd Semester</option>
+                          </select>
+                          <select className="border border-gray-300 rounded-md px-3 py-2 bg-white text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                            <option value="">All Statuses</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Enrolled">Currently Enrolled</option>
+                            <option value="Failed">Failed</option>
+                            <option value="Blocked">Blocked</option>
+                            <option value="Eligible">Eligible / Not Taken</option>
+                          </select>
+                        </div>
+
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                          <table className="w-full text-sm border-collapse bg-white">
+                            <thead>
+                              <tr className="bg-gray-100 border-b border-gray-200">
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700 whitespace-nowrap">Code</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Description</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700 whitespace-nowrap">A.Y.</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700 whitespace-nowrap">Yr/Sem</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Units</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Grade</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Remarks</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {summaryLoading ? (
+                                <tr><td colSpan="8" className="py-8 text-center text-gray-500">Loading...</td></tr>
+                              ) : filteredRoadmap.length === 0 ? (
+                                <tr><td colSpan="8" className="py-8 text-center text-gray-500">No subjects match your filters.</td></tr>
+                              ) : (
+                                filteredRoadmap.map((item, idx) => (
+                                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                    <td className="py-2.5 px-4 font-medium text-gray-900 whitespace-nowrap">{item.subject_code}</td>
+                                    <td className="py-2.5 px-4">{item.subject_description}</td>
+                                    <td className="py-2.5 px-4 text-gray-600 whitespace-nowrap">{item.academic_year || '-'}</td>
+                                    <td className="py-2.5 px-4 text-gray-600 whitespace-nowrap">Y{item.curriculum_year_level} S{item.curriculum_semester}</td>
+                                    <td className="py-2.5 px-4 text-gray-600">{item.units}</td>
+                                    <td className="py-2.5 px-4 font-medium text-gray-900">{item.grade ? Number(item.grade).toFixed(2) : '-'}</td>
+                                    <td className="py-2.5 px-4 text-gray-600">{item.remarks || '-'}</td>
+                                    <td className="py-2.5 px-4 whitespace-nowrap">
+                                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getSubjectStatusBadgeClass(item.status)}`}>
+                                        {item.status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Documents and Awards View */}
+                    {academicViewMode === 'documents' && (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 mb-4">
+                          <button onClick={() => setAcademicViewMode(null)} className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1">
+                            <FiChevronLeft /> Back to options
+                          </button>
+                        </div>
+
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                          <table className="w-full text-sm border-collapse bg-white">
+                            <thead>
+                              <tr className="bg-gray-100 border-b border-gray-200">
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">A.Y.</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Semester</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Document Type</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Document Name</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Eligibility Status</th>
+                                <th className="text-left py-3 px-4 font-semibold text-gray-700">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {summaryLoading ? (
+                                <tr><td colSpan="6" className="py-8 text-center text-gray-500">Loading...</td></tr>
+                              ) : documentsList.length === 0 ? (
+                                <tr><td colSpan="6" className="py-8 text-center text-gray-500">No documents available.</td></tr>
+                              ) : (
+                                documentsList.map((doc, idx) => (
+                                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                    <td className="py-3 px-4 text-gray-700 whitespace-nowrap">{doc.ay}</td>
+                                    <td className="py-3 px-4 text-gray-700 whitespace-nowrap">{doc.sem}</td>
+                                    <td className="py-3 px-4 text-gray-700 whitespace-nowrap">{doc.type}</td>
+                                    <td className="py-3 px-4 font-medium text-gray-900">{doc.name}</td>
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${doc.status === 'Available' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                                        {doc.status}
+                                      </span>
+                                    </td>
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <button
+                                        onClick={() => {
+                                          if (doc.actionType === 'transcript') handleDownloadTranscript();
+                                          else if (doc.actionType === 'cog') staffToast.info('Certificate of Grades', 'Not fully implemented yet.');
+                                          else generateAwardPdf(doc.name, doc.ay, doc.sem);
+                                        }}
+                                        disabled={transcriptDownloading && doc.actionType === 'transcript'}
+                                        className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded text-sm font-medium bg-tmcc text-white hover:bg-tmcc-dark disabled:opacity-50"
+                                      >
+                                        <FiDownload className="w-4 h-4" />
+                                        Download PDF
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

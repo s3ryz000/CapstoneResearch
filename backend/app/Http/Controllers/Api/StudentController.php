@@ -1041,10 +1041,43 @@ class StudentController extends Controller
             return response()->json(['message' => 'Student not found.'], 404);
         }
 
-        $service = app(\App\Services\AcademicStandingService::class);
-        $summary = $service->getAcademicSummary($student);
+        $student->load('program');
 
-        return response()->json($summary);
+        $standingService = app(\App\Services\AcademicStandingService::class);
+        $progressionService = app(\App\Services\AcademicProgressionService::class);
+
+        $summary = $standingService->getAcademicSummary($student);
+        $roadmapData = $progressionService->getCurriculumRoadmap($student);
+
+        // Compute Notifications (similar to student side, just in case staff needs it)
+        $notifications = [];
+        
+        if ($summary['latin_honors']['eligible']) {
+            $notifications[] = [
+                'type' => 'success',
+                'message' => 'Student is currently eligible for Latin Honors: ' . $summary['latin_honors']['honor']
+            ];
+        }
+        
+        if ($roadmapData['failed_subjects_count'] > 0) {
+            $notifications[] = [
+                'type' => 'warning',
+                'message' => 'Student has ' . $roadmapData['failed_subjects_count'] . ' failed subject(s) that require a retake.'
+            ];
+        }
+
+        return response()->json([
+            'student' => [
+                'student_number' => $student->student_number,
+                'name' => trim($student->first_name . ' ' . $student->last_name),
+                'program' => $student->program?->name,
+                'program_code' => $student->program?->code,
+                'enrollment_date' => $student->enrollment_date,
+            ],
+            'summary' => $summary,
+            'curriculum' => $roadmapData,
+            'notifications' => $notifications
+        ]);
     }
 
     /**
@@ -1374,21 +1407,28 @@ class StudentController extends Controller
             'role'    => $role,
         ]);
 
-        // Return updated progress
-        $student->refresh();
-        
-        // Recalculate GWA
-        $standingService = app(\App\Services\AcademicStandingService::class);
-        $standingService->recomputeAndCacheOverallGwa($student);
+        try {
+            // Return updated progress
+            $student->refresh();
+            
+            // Recalculate GWA
+            $standingService = app(\App\Services\AcademicStandingService::class);
+            $standingService->recomputeAndCacheOverallGwa($student);
 
-        $service = app(AcademicProgressionService::class);
-        $progress = $service->getAcademicProgress($student);
+            $service = app(AcademicProgressionService::class);
+            $progress = $service->getAcademicProgress($student);
 
-        return response()->json([
-            'message'       => "{$updatedCount} grade(s) updated successfully.",
-            'updated_count' => $updatedCount,
-            'errors'        => $errors,
-            'progress'      => $progress,
-        ]);
+            return response()->json([
+                'message'       => "{$updatedCount} grade(s) updated successfully.",
+                'updated_count' => $updatedCount,
+                'errors'        => $errors,
+                'progress'      => $progress,
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("bulkUpdateGrades Error: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'message' => 'Exception after saving grades: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

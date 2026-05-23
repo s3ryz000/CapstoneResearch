@@ -20,7 +20,6 @@ class AcademicStandingService
 
         // Fetch all distinct terms the student has grades for
         $grades = Grade::where('student_id', $student->student_id)
-            ->whereNull('deleted_at')
             ->get();
 
         $termKeys = $grades->map(fn($g) => $g->academic_year . '|' . $g->semester)->unique();
@@ -80,7 +79,6 @@ class AcademicStandingService
             ->where('student_id', $student->student_id)
             ->where('academic_year', $academicYear)
             ->where('semester', $semester)
-            ->whereNull('deleted_at')
             ->get();
 
         return $this->calculateWeightedAverage($grades);
@@ -94,7 +92,6 @@ class AcademicStandingService
         $grades = Grade::with('subject')
             ->where('student_id', $student->student_id)
             ->where('academic_year', $academicYear)
-            ->whereNull('deleted_at')
             ->get();
 
         return $this->calculateWeightedAverage($grades);
@@ -107,7 +104,6 @@ class AcademicStandingService
     {
         $grades = Grade::with('subject')
             ->where('student_id', $student->student_id)
-            ->whereNull('deleted_at')
             ->get();
 
         return $this->calculateWeightedAverage($grades);
@@ -139,7 +135,6 @@ class AcademicStandingService
             ->where('student_id', $student->student_id)
             ->where('academic_year', $academicYear)
             ->where('semester', $semester)
-            ->whereNull('deleted_at')
             ->get();
 
         return $this->evaluateHonorGrades($grades);
@@ -161,7 +156,6 @@ class AcademicStandingService
         $grades = Grade::with('subject')
             ->where('student_id', $student->student_id)
             ->where('academic_year', $academicYear)
-            ->whereNull('deleted_at')
             ->get();
 
         return $this->evaluateHonorGrades($grades);
@@ -178,7 +172,6 @@ class AcademicStandingService
 
         $grades = Grade::with('subject')
             ->where('student_id', $student->student_id)
-            ->whereNull('deleted_at')
             ->get();
 
         $gradesCheck = $this->evaluateHonorGrades($grades);
@@ -243,7 +236,10 @@ class AcademicStandingService
             $code = $grade->subject?->code ?? 'Unknown Subject';
 
             if ($grade->status === 'Enrolled') {
-                continue; // Enrolled subjects do not immediately disqualify, but maybe wait?
+                return [
+                    'eligible' => false,
+                    'reason' => "Still enrolled in $code. Grades are incomplete."
+                ];
             }
 
             if (in_array($grade->status, ['Failed', 'INC', 'FDA', 'DRP', 'Withdrawn', 'Cancelled'])) {

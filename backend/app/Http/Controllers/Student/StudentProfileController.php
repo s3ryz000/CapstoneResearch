@@ -282,9 +282,42 @@ class StudentProfileController extends Controller
             return response()->json(['message' => 'Student record not found.'], 404);
         }
 
-        $service = app(\App\Services\AcademicStandingService::class);
-        $summary = $service->getAcademicSummary($student);
+        $student->load('program');
+        
+        $standingService = app(\App\Services\AcademicStandingService::class);
+        $progressionService = app(\App\Services\AcademicProgressionService::class);
+        
+        $summary = $standingService->getAcademicSummary($student);
+        $roadmapData = $progressionService->getCurriculumRoadmap($student);
 
-        return response()->json($summary);
+        // Compute Notifications
+        $notifications = [];
+        
+        if ($summary['latin_honors']['eligible']) {
+            $notifications[] = [
+                'type' => 'success',
+                'message' => 'Congratulations! You are currently eligible for Latin Honors: ' . $summary['latin_honors']['honor']
+            ];
+        }
+        
+        if ($roadmapData['failed_subjects_count'] > 0) {
+            $notifications[] = [
+                'type' => 'warning',
+                'message' => 'You have ' . $roadmapData['failed_subjects_count'] . ' failed subject(s) that require a retake.'
+            ];
+        }
+
+        return response()->json([
+            'student' => [
+                'student_number' => $student->student_number,
+                'name' => trim($student->first_name . ' ' . $student->last_name),
+                'program' => $student->program?->name,
+                'program_code' => $student->program?->code,
+                'enrollment_date' => $student->enrollment_date,
+            ],
+            'summary' => $summary,
+            'curriculum' => $roadmapData,
+            'notifications' => $notifications
+        ]);
     }
 }
