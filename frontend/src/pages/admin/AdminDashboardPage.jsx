@@ -6,12 +6,13 @@ import { dashboardApi } from '../../lib/api/dashboardApi';
 
 const AdminDashboardPage = () => {
   const [activity, setActivity] = useState([]);
+  const [kpis, setKpis] = useState(null);
   
   useEffect(() => {
     dashboardApi.getDashboard()
       .then((res) => {
+        setKpis(res?.kpis || null);
         const acts = res?.recent_activity || [];
-        console.log(acts);
         const formatted = acts.map((a) => ({
           id: a.id,
           type: a.type,
@@ -29,6 +30,7 @@ const AdminDashboardPage = () => {
     { to: '/admin/users', label: 'User Management', icon: FiUserPlus, color: 'indigo' },
     { to: '/admin/reports', label: 'Reports', icon: FiBarChart2, color: 'green' },
     { to: '/admin/settings', label: 'System Settings', icon: FiSettings, color: 'slate' },
+    { to: '/staff/profile-updates', label: 'Profile Updates', icon: FiCheck, color: 'amber', count: kpis?.pending_profile_updates },
   ];
 
   const iconColorMap = {
@@ -59,16 +61,21 @@ const AdminDashboardPage = () => {
       <section className="mb-8">
         <h3 className="mb-4 text-lg font-semibold text-gray-800">Quick Actions</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {quickLinks.map(({ to, label, icon: Icon, color }) => (
+          {quickLinks.map(({ to, label, icon: Icon, color, count }) => (
             <Link
               key={to}
               to={to}
-              className="flex items-center gap-4 p-5 rounded-xl bg-white border border-gray-100 shadow-[0_4px_14px_rgba(0,0,0,0.06)] hover:border-tmcc/30 hover:shadow-md transition-all no-underline text-gray-800"
+              className="flex items-center gap-4 p-5 rounded-xl bg-white border border-gray-100 shadow-[0_4px_14px_rgba(0,0,0,0.06)] hover:border-tmcc/30 hover:shadow-md transition-all no-underline text-gray-800 relative"
             >
               <span className={`flex items-center justify-center w-12 h-12 rounded-xl ${iconColorMap[color]}`}>
                 <Icon className="w-6 h-6" />
               </span>
               <span className="font-medium">{label}</span>
+              {count !== undefined && count > 0 && (
+                <span className="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                  {count}
+                </span>
+              )}
             </Link>
           ))}
         </div>

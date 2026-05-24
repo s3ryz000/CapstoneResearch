@@ -35,6 +35,28 @@ export const staffApi = {
     return data;
   },
 
+  getPendingProfileUpdates: async () => {
+    const { data } = await apiClient.get('/staff/pending-profile-updates');
+    return data;
+  },
+
+  approveProfileUpdate: async (id) => {
+    const { data } = await apiClient.patch(`/staff/pending-profile-updates/${id}/approve`);
+    return data;
+  },
+
+  rejectProfileUpdate: async (id, payload = {}) => {
+    const { data } = await apiClient.patch(`/staff/pending-profile-updates/${id}/reject`, payload);
+    return data;
+  },
+
+  downloadProfileUpdateDocument: async (id) => {
+    const response = await apiClient.get(`/staff/pending-profile-updates/${id}/supporting-document`, {
+      responseType: 'blob',
+    });
+    return response;
+  },
+
   releaseDocument: async (requestId) => {
     const { data } = await apiClient.post('/staff/transactions', {
       request_id: requestId,

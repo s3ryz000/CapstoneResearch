@@ -13,6 +13,8 @@ const StudentSISPage = () => {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  const [saveStatus, setSaveStatus] = React.useState(null);
+  const [file, setFile] = React.useState(null);
 
   const student = profile?.student;
 
@@ -70,17 +72,49 @@ const StudentSISPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
+    setSaveStatus(null);
     try {
-      const payload = {
-        ...form,
-        elementary_year: form.elementary_year === '' ? null : Number(form.elementary_year),
-        high_school_year: form.high_school_year === '' ? null : Number(form.high_school_year),
-      };
+      let payload;
+      
+      if (file) {
+        payload = new FormData();
+        Object.entries(form).forEach(([key, val]) => {
+          if (key === 'elementary_year' || key === 'high_school_year') {
+            payload.append(key, val === '' ? '' : Number(val));
+          } else {
+            payload.append(key, val);
+          }
+        });
+        payload.append('supporting_document', file);
+      } else {
+        payload = {
+          ...form,
+          elementary_year: form.elementary_year === '' ? null : Number(form.elementary_year),
+          high_school_year: form.high_school_year === '' ? null : Number(form.high_school_year),
+        };
+      }
+
       const res = await studentApi.updateSIS(payload);
-      staffToast.success('Profile updated', res?.message || 'Changes saved successfully.');
+      
+      if (res?.message === 'No changes detected.') {
+        setSaveStatus({ type: 'info', message: 'No changes detected.' });
+      } else {
+        setSaveStatus({ 
+          type: 'success', 
+          message: res?.message || 'Your changes were submitted and are pending registrar approval.'
+        });
+        setFile(null); // Clear file on success
+      }
     } catch (err) {
-      const msg = err?.response?.data?.message || 'Failed to save SIS.';
-      staffToast.error('Save failed', msg);
+      // Check for specific validation errors like missing document
+      const errors = err?.response?.data?.errors;
+      let msg = err?.response?.data?.message || 'Failed to submit changes.';
+      
+      if (errors?.supporting_document) {
+        msg = errors.supporting_document[0];
+      }
+      
+      setSaveStatus({ type: 'error', message: msg });
     } finally {
       setSaving(false);
     }
@@ -301,14 +335,42 @@ const StudentSISPage = () => {
             </div>
           </div>
 
-          <div className="sd-cards-row" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
+          <div className="sd-cards-row" style={{ marginTop: 24 }}>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 w-full">
+              <label className="block text-sm font-semibold text-gray-800 mb-2">
+                Supporting Document <span className="text-gray-500 font-normal">(Optional unless modifying personal/background info)</span>
+              </label>
+              <input
+                type="file"
+                accept=".png,.jpg,.jpeg,.pdf,.docx"
+                onChange={(e) => setFile(e.target.files[0] || null)}
+                className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+              />
+              <p className="mt-2 text-xs text-gray-500">
+                Required for changes to address, school information, or graduation year. Accepted files: PNG, JPG, PDF, DOCX (Max 5MB).
+              </p>
+            </div>
+          </div>
+
+          <div className="sd-cards-row" style={{ justifyContent: 'flex-end', marginTop: 14, alignItems: 'center', gap: 12 }}>
+            {saveStatus && (
+              <div 
+                className={`text-sm px-4 py-2 rounded-md ${
+                  saveStatus.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' :
+                  saveStatus.type === 'info' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                  'bg-red-50 text-red-700 border border-red-200'
+                }`}
+              >
+                {saveStatus.message}
+              </div>
+            )}
             <button
               type="submit"
               className="sd-quick-link"
               style={{ width: 220, justifyContent: 'center' }}
               disabled={saving}
             >
-              {saving ? 'Saving…' : 'Save SIS'}
+              {saving ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
         </div>

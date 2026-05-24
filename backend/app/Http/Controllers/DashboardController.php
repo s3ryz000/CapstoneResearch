@@ -43,6 +43,7 @@ class DashboardController extends Controller
     private function staffOrAdminDashboard(Request $request): JsonResponse
     {
         $pendingCount = RecordRequest::where('status', RecordRequest::STATUS_PENDING)->count();
+        $pendingProfileUpdates = \App\Models\PendingStudentUpdate::where('status', 'pending')->count();
         $processedToday = Student::whereDate('created_at', today())->count();
         $studentsCount = \App\Models\Student::count();
         $releasedToday = RecordRequest::where('status', RecordRequest::STATUS_RELEASED)
@@ -65,6 +66,7 @@ class DashboardController extends Controller
         return response()->json([
             'kpis' => [
                 'pending_requests' => $pendingCount,
+                'pending_profile_updates' => $pendingProfileUpdates,
                 'processed_today' => $processedToday,
                 'students_count' => $studentsCount,
                 'documents_released_today' => $releasedToday,

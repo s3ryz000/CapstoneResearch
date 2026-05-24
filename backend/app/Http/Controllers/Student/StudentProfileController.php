@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateStudentSisRequest;
 use App\Models\ProgramMapping;
 use App\Models\SystemLog;
 use App\Models\SystemSetting;
+use App\Models\PendingStudentUpdate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -233,33 +234,92 @@ class StudentProfileController extends Controller
         ];
 
         $oldValues = [];
-        foreach (array_keys($validated) as $field) {
-            $oldValues[$field] = $student->getAttribute($field);
+        $newValues = [];
+        $changedFields = [];
+        $changedLabels = [];
+
+        $supportingDocument = null;
+        if (array_key_exists('supporting_document', $validated)) {
+            $supportingDocument = $request->file('supporting_document');
+            unset($validated['supporting_document']);
         }
 
-        $student->update($validated);
-        $student->refresh();
-
-        $changed = [];
         foreach ($validated as $field => $newVal) {
-            if ((string) ($oldValues[$field] ?? '') !== (string) ($newVal ?? '')) {
-                $changed[] = $fieldLabels[$field] ?? str_replace('_', ' ', $field);
+            $oldVal = $student->getAttribute($field);
+            
+            // Format dates if necessary
+            if ($oldVal instanceof \Carbon\Carbon || $oldVal instanceof \Illuminate\Support\Carbon) {
+                $oldVal = $oldVal->format('Y-m-d');
+            }
+
+            if ((string) $oldVal !== (string) ($newVal ?? '')) {
+                $oldValues[$field] = $oldVal;
+                $newValues[$field] = $newVal;
+                $changedFields[] = $field;
+                $changedLabels[] = $fieldLabels[$field] ?? str_replace('_', ' ', $field);
             }
         }
 
+        if (empty($changedFields)) {
+            return response()->json([
+                'message' => 'No changes detected.'
+            ]);
+        }
+
+        // Check if supporting document is required
+        $documentRequiredFields = [
+            'address', 'place_of_birth', 'sex', 'guardian_name', 'citizenship',
+            'contact_number', 'elementary_school', 'elementary_year', 
+            'high_school', 'high_school_year', 'previous_school', 'previous_course'
+        ];
+        
+        $needsDocument = !empty(array_intersect($changedFields, $documentRequiredFields));
+
+        if ($needsDocument && !$supportingDocument) {
+            return response()->json([
+                'message' => 'A supporting document is required for the fields you modified.',
+                'errors' => ['supporting_document' => ['Proof document is required.']]
+            ], 422);
+        }
+
+        $documentPath = null;
+        $documentName = null;
+        $documentMime = null;
+        $documentSize = null;
+
+        if ($supportingDocument) {
+            $documentPath = $supportingDocument->store('pending-profile-updates', 'local');
+            $documentName = $supportingDocument->getClientOriginalName();
+            $documentMime = $supportingDocument->getMimeType();
+            $documentSize = $supportingDocument->getSize();
+        }
+
+        PendingStudentUpdate::create([
+            'student_id' => $student->student_id,
+            'submitted_by' => $request->user()->id,
+            'status' => 'pending',
+            'old_values' => $oldValues,
+            'new_values' => $newValues,
+            'changed_fields' => $changedFields,
+            'supporting_document_path' => $documentPath,
+            'supporting_document_original_name' => $documentName,
+            'supporting_document_mime' => $documentMime,
+            'supporting_document_size' => $documentSize,
+        ]);
+
         $studentName   = trim($student->first_name . ' ' . $student->last_name);
-        $studentNumber = $student->student_number ?? "ID#{$student->id}";
-        $changedStr    = $changed ? implode(', ', $changed) : 'no changes';
+        $studentNumber = $student->student_number ?? "ID#{$student->student_id}";
+        $changedStr    = implode(', ', $changedLabels);
         $ip            = $request->ip();
 
         SystemLog::create([
-            'action'  => "Student {$studentNumber} ({$studentName}) updated profile: {$changedStr} [IP: {$ip}]",
+            'action'  => "Student {$studentNumber} ({$studentName}) submitted profile update for approval: {$changedStr} [IP: {$ip}]",
             'user_id' => $request->user()->id,
             'role'    => $request->user()->roles->first()?->name ?? $request->user()->role ?? null,
         ]);
 
         return response()->json([
-            'message' => 'SIS updated successfully.',
+            'message' => 'Your changes were submitted and are pending registrar approval.',
             'student' => $student->load('program'),
         ]);
     }

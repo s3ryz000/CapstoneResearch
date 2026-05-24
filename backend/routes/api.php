@@ -70,6 +70,17 @@ Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(
     Route::delete('/students/{id}/grades/{gradeId}', [StudentController::class, 'destroyGrade']);
 });
 
+use App\Http\Controllers\Api\PendingStudentUpdateController;
+
+// ---- Staff & Admin: Profile Updates (pending, approve, reject) ----
+Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(function () {
+    Route::get('/pending-profile-updates', [PendingStudentUpdateController::class, 'index']);
+    Route::get('/pending-profile-updates/{id}', [PendingStudentUpdateController::class, 'show']);
+    Route::get('/pending-profile-updates/{id}/supporting-document', [PendingStudentUpdateController::class, 'downloadDocument']);
+    Route::patch('/pending-profile-updates/{id}/approve', [PendingStudentUpdateController::class, 'approve']);
+    Route::patch('/pending-profile-updates/{id}/reject', [PendingStudentUpdateController::class, 'reject']);
+});
+
 // ---- Staff & Admin: Record requests (pending, approve, reject, approved list, release) ----
 Route::middleware(['auth:sanctum', 'role:staff,admin'])->prefix('staff')->group(function () {
     Route::get('/pending-requests', [RequestController::class, 'indexPending']);
@@ -120,7 +131,7 @@ Route::middleware(['auth:sanctum', 'role:student'])->prefix('student')->group(fu
     Route::get('/grades', [StudentProfileController::class, 'grades']);
     Route::get('/curriculum', [StudentProfileController::class, 'curriculum']);
     Route::get('/academic-summary', [StudentProfileController::class, 'academicSummary']);
-    Route::put('/sis', [StudentProfileController::class, 'updateSis']);
+    Route::match(['put', 'post'], '/sis', [StudentProfileController::class, 'updateSis']);
 });
 
 // ---- Student: Own record requests ----

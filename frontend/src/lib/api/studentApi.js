@@ -17,6 +17,13 @@ export const studentApi = {
 
   /** Update authenticated student's SIS/SIUF fields (own record only). */
   updateSIS: async (payload) => {
+    if (payload instanceof FormData) {
+      payload.append('_method', 'PUT');
+      const { data } = await apiClient.post('/student/sis', payload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return data;
+    }
     const { data } = await apiClient.put('/student/sis', payload);
     return data;
   },

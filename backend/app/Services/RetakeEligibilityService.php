@@ -164,10 +164,14 @@ class RetakeEligibilityService
         }
 
         // ── Step 5: Build the "available this term" list ─────────────────────
-        // Universal rule: a failed/withdrawn/FDA subject is eligible for retake
-        // in ANY future term regardless of semester.
-        // The only gate is the exact-term duplicate check already done in Step 4.
-        $available = $required;
+        // Semester-matching rule: a failed subject is only available for retake 
+        // when the next allowed term's semester matches the subject's curriculum semester.
+        $available = [];
+        foreach ($required as $req) {
+            if ((int) $req['curriculum_semester'] === $nextSemester) {
+                $available[] = $req;
+            }
+        }
 
         return [
             'retake_subjects_required'  => array_values($required),

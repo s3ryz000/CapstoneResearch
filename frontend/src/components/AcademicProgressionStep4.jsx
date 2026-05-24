@@ -69,7 +69,7 @@ export default function AcademicProgressionStep4({
   });
 
   const cancelEnrollmentMutation = useMutation({
-    mutationFn: ({ enrollmentId, reason }) => staffApi.deleteEnrollment(studentId, enrollmentId, reason),
+    mutationFn: ({ enrollmentId, reason }) => staffApi.deleteEnrollment(studentId, enrollmentId, { reason }),
     onSuccess: () => {
       staffToast.success('Enrollment cancelled successfully.');
       queryClient.invalidateQueries({ queryKey: ['academicProgress', studentId] });

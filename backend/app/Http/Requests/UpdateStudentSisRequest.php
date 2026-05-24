@@ -28,6 +28,13 @@ class UpdateStudentSisRequest extends FormRequest
             'high_school_year' => ['nullable', 'integer', 'min:1900', 'max:2100'],
             'previous_school' => ['nullable', 'string', 'max:150'],
             'previous_course' => ['nullable', 'string', 'max:150'],
+
+            'supporting_document' => [
+                'nullable',
+                'file',
+                'mimes:png,jpg,jpeg,pdf,docx',
+                'max:5120', // 5 MB max
+            ],
         ];
     }
 }
